@@ -359,5 +359,20 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **验证**：workflow YAML 结构核对通过（service 端口/healthcheck/env 占位符与 A4 一致）；**CI 实际运行待 push 后 GitHub Actions 触发**（本环境无法触发远程 CI）。
 - **提交**：server `696521e`（已推送）。
 
-> Phase 2：B1 ✅（路 B 规范化，V5 拆列 + 派生列同步）/ B3 ✅（单实例 + 乐观锁，version 不匹配 → 409 + 无静默覆盖）/ **B2 分页：后端 ✅（page/size → {list,total}，向后兼容）/ 前端列表页改分页 ⏸（=内存引擎退役首步，待拍板）** / C1 🔶（工件就绪，起栈验证待 Docker 环境）/ C2 🔶（CI workflow 就绪，运行验证待 push 触发）。
-> 下一步按 P1 优先级：A5 输入校验（@Valid DTO）/ B2 前端列表页改分页（架构决定）/ C3 可观测性 / C4 服务端定时 / C5 CORS / D1 OpenAPI / D2 契约测试。
+#### C3 可观测性（actuator + 结构化日志）— done-verified ✅
+- **实现**（actuator + 结构化 JSON 日志含 traceId；tracing/OTLP 可选，本环境无 collector 默认关）：
+  - `pom`：+ `spring-boot-starter-actuator`（health/info/metrics）+ `logstash-logback-encoder 8.0`（JSON 日志）。
+  - `application.yml`：`management.endpoints.web.exposure.include: health,info,metrics` + `metrics.tags.application: bulkhaul-server`。
+  - 新增 `common/TraceIdFilter.java`（`@Order(HIGHEST_PRECEDENCE)`，**先于安全过滤链**）：请求级 traceId 写 MDC（取上游 `X-Request-Id` 或生成 16 位短 UUID），回写响应头供前端/监控关联；401/403 等安全日志也带 traceId。
+  - 新增 `logback-spring.xml`：**prod → 结构化 JSON**（logstash，含 `@timestamp`/`message`/`logger_name`/`level`/MDC `traceId` + 静态 `app:bulkhaul-server`，可被 ELK/Loki 解析）；**!prod → 人类可读 pattern**（含 traceId，本地调试）。
+  - `SecurityConfig`：`/actuator/health` + `/actuator/info` 放行（公开探活）；`/actuator/metrics` 保持已认证（受保护，可抓取）。
+  - 既有 `/api/health`（自定义，含表数）保留不动（compose 后端 healthcheck 为 TCP 探活，不受影响）。
+- **验证**：
+  - 后端集成测试 +`ActuatorIntegrationTest`（MockMvc）：`/actuator/health` 200 UP / `/actuator/info` 200 / `/actuator/metrics` 未认证 401（受保护）→ **Tests run 26（17+6+3）全绿**。
+  - 运行中后端 E2E（真 HTTP）：9 条全过（health 公开 200 UP / info 200 / metrics 未认证 401 + 已认证 200 含 JVM 指标 / 既有 /api/health 向后兼容 / X-Request-Id 回写 + 缺失生成 16 位）。
+  - **prod profile 日志格式实测**：`-Dspring.profiles.active=prod` 启动，日志行均为合法 JSON（`{"@timestamp":...,"message":...,"logger_name":...,"level":...,"app":"bulkhaul-server"}`），可被日志平台解析。
+  - **构建提速**：WSL 原生副本（`~/bulkhaul-server-wsl`）编译/测试（规避 /mnt/d 慢 IO），在线经 aliyun 镜像拉新依赖（actuator/micrometer/logstash-encoder）；`dev` 分支提交、验证后 squash 合并 master（单 commit）。
+- **提交**：bulkhaul-server（本条，dev → master 单 commit，已推送）+ bulkhaul-manage-web（verify-c3-observability.mjs）。
+
+> Phase 2：B1 ✅（路 B 规范化，V5 拆列 + 派生列同步）/ B3 ✅（单实例 + 乐观锁，version 不匹配 → 409 + 无静默覆盖）/ **B2 分页：后端 ✅（page/size → {list,total}，向后兼容）/ 前端列表页改分页 ⏸（=内存引擎退役首步，待拍板）** / C1 🔶（工件就绪，起栈验证待 Docker 环境）/ C2 🔶（CI workflow 就绪，运行验证待 push 触发）/ **C3 ✅（actuator + 结构化 JSON 日志含 traceId）**。
+> 下一步按 P1 优先级：B2 前端列表页改分页（架构决定）/ C4 服务端定时 / C5 CORS / D1 OpenAPI / D2 契约测试。
