@@ -34,7 +34,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 | A2 | 安全 | 登录防爆破 + 锁定（服务端） | **P0** ✅done | 小 | — |
 | A4 | 安全 | 密钥/配置外置（生产 profile） | **P0** ✅done | 小 | — |
 | C1 | 运维 | 部署工件（Dockerfile + compose） | **P0** 🔶工件就绪 | 中 | A4 |
-| C2 | 运维 | 后端 CI | **P0** | 小 | — |
+| C2 | 运维 | 后端 CI | **P0** 🔶workflow就绪 | 小 | — |
 | B1 | 架构 | 存储模型决策（JSON blob → 规范化） | **P0** | 大 | — |
 | B3 | 架构 | 并发/冲突模型（乐观锁 / 多实例） | **P0** | 中 | B1 |
 | A3 | 安全 | 全局限流 | P1 | 小 | A2 |
@@ -284,5 +284,14 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **提交**：server `88abe4a` + web `033335e` + docs（本条）已推送。
 
 > Phase 1 完成度：A1 ✅ / A2 ✅ / A4 ✅ / **A3 限流（P1，待做）** / A5 校验（P1，待做）。
-> Phase 2 运维：C1 🔶（工件就绪，起栈验证待 Docker 环境）/ **C2 后端 CI（P0，待做）** / B1 存储 / B3 并发。
+
+#### C2 后端 CI（GitHub Actions）— done（workflow 就绪，CI 运行验证待 push 触发）🔶
+- **实现**：
+  - `bulkhaul-server/.github/workflows/backend-ci.yml`：push/PR 到 master 触发；
+    services `mysql:8`（建 blms_test 库 + healthcheck）+ `redis:7`（healthcheck）；JDK 17（temurin）+ Maven 依赖缓存；`mvn -B test`（Flyway V1-V4 建表灌种子 + 159 断言）；失败上传 surefire 报告。
+  - `application-test.yml` 数据源改 `TEST_DB_*` 环境变量占位符（本地默认值不变，零行为变化）；CI 经 env 指向 service 容器。
+- **验证**：workflow YAML 结构核对通过（service 端口/healthcheck/env 占位符与 A4 一致）；**CI 实际运行待 push 后 GitHub Actions 触发**（本环境无法触发远程 CI）。
+- **提交**：server `696521e`（已推送）。
+
+> Phase 2 运维：C1 🔶（工件就绪，起栈验证待 Docker 环境）/ C2 🔶（CI workflow 就绪，运行验证待 push 触发）/ **B1 存储模型（P0，架构决定，待拍板）** / B3 并发。
 > 下一步按 P0 优先级：**C1 部署工件（Dockerfile+compose）** → C2 后端 CI → B1 存储模型（架构决定，影响 B2/B3）→ B3 并发。
