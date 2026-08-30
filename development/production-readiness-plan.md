@@ -290,6 +290,18 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
   - 前端 **verify-ui 82/0**（A3 过滤器在真实 HTTP 路径上，24 次登录 + 大量写零误报，过滤器顺序/维度正确）。
 - **提交**：bulkhaul-server（本条，已推送）。
 
+#### A5 输入校验 — done-verified ✅（阶段一：3 个高频 create 端点 DTO 化）
+- **实现**（分阶段：先 DTO 化高频 create 端点，其余 94 个写端点保留 Map + 服务层显式校验，后续按需推进）：
+  - 新增 `dto/CreateContractRequest` / `CreatePlanRequest` / `CreateDispatchesRequest`（`@NotBlank`/`@NotNull`/`@Positive`/`@Min`，约束消息对齐服务层既有校验文案，UX 不变；可选字段缺省走服务层默认值，`toMap()` 非 null 才放）。
+  - `ContractController.createContract/createPlan` + `DispatchController.create` 改 `@Valid @RequestBody <DTO>`（字段与前端表单 1:1，已核对 contract/create.vue、plan/create.vue、dispatch 表单）。
+  - `GlobalExceptionHandler`：`MethodArgumentNotValidException` → **400 + `code:validation_error` + `data.fieldErrors`（字段→首条消息，字段级）**；`ApiResult.fail` 补 `(error, code, data)` 重载。
+  - 契约：**已认证用户 + 非法 body → 400**（匿名 → 401 属认证层，非 A5 范畴）；校验先于业务逻辑（非法 body 不进 service）。
+- **验证**：
+  - 后端集成测试 +`ValidationIntegrationTest`（MockMvc，admin 登录取 token）：contract 缺 name+quantity / quantity=0 / plan 缺 contractId / dispatch 缺 planId / count=0 → 均 **400 validation_error + 字段级 fieldErrors**；必填齐全（占位 ID）→ 通过 @Valid 进业务逻辑（非 validation_error）→ **Tests run 23（17+6）全绿**。
+  - 运行中后端 E2E（真 HTTP，admin token）：13 条断言全过（400 + code + 字段级 name/quantity/contractId/planId/count + 必填齐全非 400）。
+  - **构建提速**：WSL 原生副本（`~/bulkhaul-server-wsl`）编译/测试（规避 /mnt/d 跨文件系统慢 IO），`dev` 分支提交、验证后 squash 合并 master（单 commit）。
+- **提交**：bulkhaul-server（本条，dev → master 单 commit，已推送）+ bulkhaul-manage-web（verify-a5-validation.mjs）。
+
 ### Phase 2 架构（B1 / B3）— 2026-08-30
 
 #### B1 存储模型规范化（路 B）— done-verified ✅
@@ -337,7 +349,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **验证**：compose 结构/引用核对通过（build context 指向两仓库、healthcheck 顺序、env 占位符与 A4 一致）；**当前环境无 Docker daemon**，端到端 `docker compose up -d --build` 起栈验证待有 Docker 的机器执行（C1 done-verified 门槛）。
 - **提交**：server `88abe4a` + web `033335e` + docs（本条）已推送。
 
-> Phase 1 完成度：A1 ✅ / A2 ✅ / A3 ✅ / A4 ✅ / **A5 校验（P1，待做）**。
+> Phase 1 完成度：A1 ✅ / A2 ✅ / A3 ✅ / A4 ✅ / **A5 ✅（阶段一：3 个高频 create 端点 DTO 化，其余写端点分阶段推进）**。
 
 #### C2 后端 CI（GitHub Actions）— done（workflow 就绪，CI 运行验证待 push 触发）🔶
 - **实现**：
