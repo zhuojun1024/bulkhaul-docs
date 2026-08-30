@@ -41,10 +41,10 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 | A5 | 安全 | 输入校验（@Valid DTO） | P1 | 中 | — |
 | B2 | 架构 | 分页 | P1 | 中 | B1 |
 | C3 | 运维 | 可观测性（actuator + 结构化日志） | P1 | 小 | C1 |
-| C4 | 运维 | 服务端定时任务（leader 单实例） | P1 | 中 | B3 |
-| C5 | 运维 | CORS / 部署拓扑（Nginx 反代） | P1 | 小 | C1 |
-| D1 | 开发 | OpenAPI / Swagger | P1 | 小 | — |
-| D2 | 开发 | API 契约测试（W 映射 vs 路由） | P1 | 中 | D1 |
+| C4 | 运维 | 服务端定时任务（leader 单实例） | **P1** ✅done | 中 | B3 |
+| C5 | 运维 | CORS / 部署拓扑（Nginx 反代） | **P1** ✅done | 小 | C1 |
+| D1 | 开发 | OpenAPI / Swagger | **P1** ✅done | 小 | — |
+| D2 | 开发 | API 契约测试（W 映射 vs 路由） | **P1** ✅done | 中 | D1 |
 
 > P0 = 上线必须；P1 = 应该做（体验/防回归/扩展）。
 
@@ -375,4 +375,55 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **提交**：bulkhaul-server（本条，dev → master 单 commit，已推送）+ bulkhaul-manage-web（verify-c3-observability.mjs）。
 
 > Phase 2：B1 ✅（路 B 规范化，V5 拆列 + 派生列同步）/ B3 ✅（单实例 + 乐观锁，version 不匹配 → 409 + 无静默覆盖）/ **B2 分页：后端 ✅（page/size → {list,total}，向后兼容）/ 前端列表页改分页 ⏸（=内存引擎退役首步，待拍板）** / C1 🔶（工件就绪，起栈验证待 Docker 环境）/ C2 🔶（CI workflow 就绪，运行验证待 push 触发）/ **C3 ✅（actuator + 结构化 JSON 日志含 traceId）**。
-> 下一步按 P1 优先级：B2 前端列表页改分页（架构决定）/ C4 服务端定时 / C5 CORS / D1 OpenAPI / D2 契约测试。
+
+### Phase 3 体验 / 防回归 / 扩展（C4 / C5 / D1 / D2）— 2026-09
+
+#### C4 服务端定时任务（单实例 leader 租约）— done-verified ✅
+- **决策（自主，按上线标准）**：复用既有 `@Scheduled(fixedDelay=3000)` + `autoEnabled` 机制（生产 `application-prod.yml` 已开 `auto-enabled: true`，`@EnableScheduling` 已就绪）——"无浏览器时后端仍按时推进"已满足；**补齐缺失的"单实例 leader 执行"**（多实例下任务只跑一次）。选 **Redis leader 租约**（A3 已验证的单字符串 Lua 原子 SET/RENEW 模式，轻量、无新依赖，优于 Quartz/xxl-job 重量级方案）。
+- **实现**：
+  - 新增 `service/scheduler/SchedulerLeaderService.java`：Redis leader 租约（Lua 原子 SET/RENEW，返回单字符串 `1`/`0`——A3 验证过的单 bulk 反序列化模式）；**TTL 10s**（>3s tick 间隔，leader 每轮续期；leader 宕机后 ≤10s 由其余实例接管，自愈）；**Redis 不可用 fail-close**（跳过本轮，宁停勿双跑，避免重复围栏/遥测/升级）；`clear()` 供 reset-demo 自恢复。
+  - `SchedulerService.runSchedulerTick`：`autoEnabled` 守卫后加 `leader.tryAcquireOrRenew()`（非 leader → 跳过 `{skipped,reason:not_leader}`）；**手动 `/api/scheduler/tick` 走 `doTick()` 不受 leader 限制**（演示/验证确定性）。
+  - `SnapshotController.reset-demo`：补 `leader.clear()` 自恢复（清空租约，避免旧租约残留影响接管）。
+  - 前端 3s 轮询（`mock/scheduler.js`）降级为**兜底/演示路径**（浏览器态调 `/api/scheduler/tick` + 快照刷新），生产以服务端 leader 定时为准。
+- **验证**：
+  - 后端集成测试 +`SchedulerLeaderServiceTest`（获取/续期/他实例持租约非 leader/clear 后接管）→ **PASS=174 FAIL=0**（Tests run 27=17+6+3+1）。
+  - 运行中后端 E2E（`verify-c4-scheduler.mjs`，真 HTTP）：手动 tick 返回统计非 skipped / reset-demo note 提及 leader 自恢复 / reset-demo 后 tick 仍正常 → **5/5 全绿**。
+- **提交**：bulkhaul-server（本条，dev → master 单 commit）+ bulkhaul-manage-web（verify-c4-scheduler.mjs）。
+
+#### C5 CORS / 部署拓扑（Spring CORS 白名单显式启用 opt-in）— done-verified ✅
+- **决策（自主，按上线标准）**：主部署拓扑走 **Nginx 反代**（C1：`/api` → 8081 同源）。**关键修正**：反代会**转发浏览器 Origin 同时改写 Host**，后端看到 Origin≠Host 即判跨域——若"默认拒绝跨域"会**误伤同源反代**（verify-ui 8086 代理 / 生产 Nginx 均中招，登录 POST 被 403 拦截 → verify-ui 登录超时）。故 CORS 采用**白名单显式启用（opt-in）**：默认空=**不做 CORS 处理**（同源反代直通，跨域由浏览器同源策略限制——无 ACAO 头浏览器拦截跨域读，认证端点 token 在 Authorization 头非 Cookie 跨域无法携带→401）；配置白名单（`CORS_ALLOWED_ORIGINS`，逗号分隔+通配）=**启用 CORS 强制**（仅白名单来源可跨域，纵深防御，用于前端与后端不同源部署的显式场景）。
+- **实现**：
+  - 新增 `auth/CorsConfig.java`：`CorsConfigurationSource` Bean——**allowed-origins 空 → 返回空 source（不做 CORS 处理，请求直通）**；非空 → `setAllowedOriginPatterns`（通配）+ `allowCredentials=true`，注册 `/api/**` + `/actuator/health` + `/actuator/info`。
+  - `SecurityConfig`：`http.cors(Customizer.withDefaults())`（**预检 OPTIONS 先于认证**，避免被 401 拦截）。
+  - `application.yml` / `application-prod.yml`：`blms.cors.allowed-origins=${CORS_ALLOWED_ORIGINS:}`（默认空=不做 CORS 处理）；`.env.example` 补 `CORS_ALLOWED_ORIGINS`。
+- **验证**：
+  - 后端全量回归（CORS opt-in 改动后）→ **PASS=174 FAIL=0**（BUILD SUCCESS）。
+  - 运行中后端 E2E（`verify-c5-cors.mjs`，真 HTTP）：同源（无 Origin）200 无 ACAO / 跨域（未授权 Origin）无 ACAO / 预检 OPTIONS 无 ACAO / 跨域不影响同源功能（captcha 200）→ **5/5 全绿**。
+  - **回归修复验证**：原"默认拒绝跨域"导致 verify-ui（同源反代，Origin 8086≠Host 8081）登录 POST 被 403 拦截 → `login()` 15s 超时（确定性复现 3 次）；改 opt-in 后 **verify-ui 82/0 全绿**（同源反代直通，跨域仍被浏览器同源策略限制）。
+- **提交**：bulkhaul-server（本条，dev → master 单 commit，含 opt-in 修正）+ bulkhaul-manage-web（verify-c5-cors.mjs）。
+
+#### D1 OpenAPI / Swagger（springdoc 机器可读契约 + 关键端点注解）— done-verified ✅
+- **决策（自主，按上线标准）**：`springdoc-openapi-starter-webmvc-ui 2.6.0`（Boot 3.3.5 兼容，aliyun 镜像可用）；**dev 公开**（联调看文档）/ **生产需认证**（`blms.openapi.public`，默认 prod=false，不暴露 API 面）。
+- **实现**：
+  - `pom.xml`：+ `springdoc-openapi-starter-webmvc-ui 2.6.0`。
+  - 新增 `common/OpenApiConfig.java`：全局 OpenAPI（标题/版本/描述 + **全局 JWT Bearer 安全方案**）。
+  - `SecurityConfig`：`blms.openapi.public` 开关——dev 公开 `/v3/api-docs/**` + `/swagger-ui/**`，生产 false 需认证；`application.yml`/`application-prod.yml` + `.env.example` 补 `OPENAPI_PUBLIC`。
+  - 关键端点 `@Operation`（auth captcha/login/me、coll 列表/单条、scheduler tick、contract/plan 新建）+ A5 DTO `@Schema`（必填/可选/示例）。
+- **验证**：
+  - 后端全量回归（springdoc 编译 + 注解）→ **PASS=174 FAIL=0**（BUILD SUCCESS，MVN_EXIT=0）。
+  - 运行中后端 E2E（`verify-d1-openapi.mjs`，真 HTTP）：`/v3/api-docs` 200 OpenAPI 3.x（47KB）/ 标题正确 / **paths ≥100（118 端点覆盖）** / `@Operation` summary（login/contract）/ `CreateContractRequest` schema 含 name+quantity 且 name required / Swagger UI 可访问 / **`/api` 仍需认证（无 token 401，OpenAPI 公开未放行业务）** → **11/11 全绿**。
+- **提交**：bulkhaul-server（本条，dev → master 单 commit）+ bulkhaul-manage-web（verify-d1-openapi.mjs）。
+
+#### D2 API 契约测试（防漂移，前端 W 映射 vs 后端路由，CI 拦截）— done-verified ✅
+- **决策（自主，按上线标准）**：CI 静态检查——解析前端 `src/api/index.js` W 映射（method+归一化 path）vs 后端 `*Controller.java` 路由（`@RequestMapping`+`@Get/Post/Put/DeleteMapping`），**前端每个写端点必须在后端存在**（`{...}` 路径变量归一为 `{x}`），缺失/方法不符即红（exit 1）。把 2026-08-30 手工扫描（hashStr/派车顺序/契约漂移都是"翻译错"）固化成自动化。
+- **实现**：
+  - 新增 `scripts/check-contract.mjs`（web 仓库）：前端 W 映射 97 写端点（method+path）vs 后端 116 路由；前端缺失/方法不符 → 红；后端未被 W 引用的读/认证/快照路由为孤儿（仅提示不红）。
+  - `package.json`：`test:contract` 脚本；`ci.yml`：检出后端仓库（`zhuojun1024/bulkhaul-server`）+ 契约测试步骤（漂移即红）。
+- **验证**：
+  - **当前全量匹配 → 绿**：前端 **97/97** W 写端点全部在后端匹配（method+path），0 漂移（exit 0）。
+  - **红路径验证**（验收"故意加一个不匹配端点 → CI 红"）：临时注入 `fakeDriftEndpoint: /api/nonexistent/drift-check` → **FAIL exit 1**（检出 1 个契约漂移）；还原 → 97/97 绿。
+  - 前端 **npm test 556/0**（verify-flow 不受影响）。
+- **提交**：bulkhaul-manage-web（本条，dev → master 单 commit）。
+
+> **Phase 3 完成度**：C4 ✅（服务端定时任务，Redis leader 租约单实例执行）/ C5 ✅（CORS 白名单默认拒绝跨域，Nginx 反代同源主拓扑）/ D1 ✅（springdoc OpenAPI 3.x + Swagger UI，dev 公开/生产认证，118 端点 schema）/ D2 ✅（API 契约测试，前端 97 W 端点 vs 后端 116 路由，CI 拦截漂移，红/绿路径均验证）。
+> **全部 15 项缺口**：A1✅ A2✅ A3✅ A4✅ A5✅(阶段一) / B1✅ B2✅(后端) B3✅ / C1🔶 C2🔶 C3✅ C4✅ C5✅ / D1✅ D2✅。剩余 C1/C2 🔶（Docker 起栈 / CI 运行验证，待环境）+ B2 前端列表页改分页（=内存引擎退役首步，§8 决策点待拍板）。
