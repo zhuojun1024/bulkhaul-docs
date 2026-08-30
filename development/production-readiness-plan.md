@@ -317,6 +317,16 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
   - 前端 **npm test 556/0** + eslint 0 + build 成功（api 层保持 node 可测）。
 - **提交**：bulkhaul-server + bulkhaul-manage-web（本条，已推送）。
 
+#### B2 分页 — 后端 done-verified ✅ / 前端列表页改分页 ⏸（架构决定，待拍板）
+- **后端（已实现+验证）**：
+  - `CollReadController.list`：`GET /api/coll/{name}` 加 `page/size`（size 默认 20、上限 200）→ `{list, total, page, size}`；**不带 page → 全量返回（向后兼容）**——`/api/snapshot` hydrate、验证脚本、旧前端客户端分页均不受影响。
+  - 行级数据范围（A1）与分页叠加：区域集合先按当前操作人过滤，`total`=过滤后行数（user02 华北 total=79 < admin 202，页内全为华北）。
+- **验证**：
+  - 后端集成测试 +B2 断言（不带 page 全量向后兼容 / page=1 size=20 → 20 条+total / page=2 无重叠 / 超范围页空 list+total 不变 / size 上限 200 / 行级+分页 user02 total=华北）→ **PASS=174 FAIL=0**（原 168）。
+  - 运行中后端 E2E（真 HTTP）：不带 page 全量 202；page=1 size=20 → 20+total=202；page=2 无重叠；超范围页空；size 上限 200；user02 total=79 < admin 202（行级+分页正确）。
+- **前端（待拍板）**："列表页改走分页端点（不再拉全量）"= **前端内存引擎退役的首步**（§8 决策点：触发条件=真实多用户生产，届时引擎收进 demo 门控、主路径薄客户端化）。当前前端为 local-first 内存引擎（`/api/snapshot` hydrate 全量 34 集合 → 客户端分页 `filtered.slice`，详情/交叉引用/流程引擎依赖全量内存态）。改列表页走分页端点需薄客户端化列表视图（分页加载 + 详情按需取单条），属架构级改动，**不随 B2 后端默认推进**。
+- **提交**：bulkhaul-server（本条，已推送）。
+
 #### C1 部署工件（Dockerfile + compose 全栈）— done（工件就绪，端到端起栈验证待 Docker 环境）🔶
 - **实现**：
   - `bulkhaul-server/Dockerfile`：Maven 多阶段（pom 预拉依赖层缓存 + -DskipTests）→ JRE 非 root 运行（8081，JAVA_OPTS 基线）+ `.dockerignore`。
@@ -337,5 +347,5 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **验证**：workflow YAML 结构核对通过（service 端口/healthcheck/env 占位符与 A4 一致）；**CI 实际运行待 push 后 GitHub Actions 触发**（本环境无法触发远程 CI）。
 - **提交**：server `696521e`（已推送）。
 
-> Phase 2：B1 ✅（路 B 规范化，V5 拆列 + 派生列同步）/ B3 ✅（单实例 + 乐观锁，version 不匹配 → 409 + 无静默覆盖）/ C1 🔶（工件就绪，起栈验证待 Docker 环境）/ C2 🔶（CI workflow 就绪，运行验证待 push 触发）。
-> 下一步按 P1 优先级：A3 全局限流 / A5 输入校验（@Valid DTO）/ B2 分页（依赖 B1 已就绪）/ C3 可观测性 / C4 服务端定时 / C5 CORS / D1 OpenAPI / D2 契约测试。
+> Phase 2：B1 ✅（路 B 规范化，V5 拆列 + 派生列同步）/ B3 ✅（单实例 + 乐观锁，version 不匹配 → 409 + 无静默覆盖）/ **B2 分页：后端 ✅（page/size → {list,total}，向后兼容）/ 前端列表页改分页 ⏸（=内存引擎退役首步，待拍板）** / C1 🔶（工件就绪，起栈验证待 Docker 环境）/ C2 🔶（CI workflow 就绪，运行验证待 push 触发）。
+> 下一步按 P1 优先级：A5 输入校验（@Valid DTO）/ B2 前端列表页改分页（架构决定）/ C3 可观测性 / C4 服务端定时 / C5 CORS / D1 OpenAPI / D2 契约测试。
