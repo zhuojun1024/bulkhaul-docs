@@ -230,7 +230,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 
 （实现时按 Phase 追加：任务 → 改动文件 → 验证输出 → done-verified）
 
-### Phase 1 安全（A1 / A2 / A4）— 2026-08-30
+### Phase 1 安全（A1 / A2 / A3 / A4）— 2026-08-30
 
 #### A1 行级数据权限服务端强制 — done-verified ✅
 - **决策（用户拍板）**：扩大范围——过滤所有含区域维度的集合，前端同步验证。
@@ -272,6 +272,24 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **验证**：mvn test 全绿（占位符默认值生效）；生产部署路径 = 注入 env 变量 + `SPRING_PROFILES_ACTIVE=prod`。
 - **提交**：bulkhaul-server `200743b`（已推送）。
 
+#### A3 全局限流 — done-verified ✅
+- **实现**（Redis 固定窗口，非引入新依赖；单实例 B3 口径下 Redis 计数即权威）：
+  - 新增 `common/RateLimitService.java`：Redis 固定窗口（60s）计数，**Lua 原子 INCR+EXPIRE**（无竞态）；脚本返回单字符串 `计数:剩余秒数`（规避 StringRedisTemplate 反序列化 Lua 多 bulk 表失败）；**Redis 不可用 fail-open**（限流是防护层，不阻断全部请求）；`clearAll()` 供 reset-demo 自恢复。
+  - 新增 `common/RateLimitFilter.java`（`OncePerRequestFilter`，**在 JwtAuthFilter 之后**运行——写档可按用户限流，未认证按 IP 兜底）：
+    - **登录档**（`/api/auth/login`、`/api/auth/captcha`）：按 IP（严格，防刷登录/验证码）。
+    - **写档**（`/api/**` 的 POST/PUT/DELETE）：按用户（适度，防单账号高频写）。
+    - **GET 不限**（读多写少，快照/列表高频轮询不受限）。
+    - **排除**：`/api/scheduler/tick`（前端每 3s 心跳，系统行为非用户写）+ `/api/admin/reset-demo`（自恢复端点）。
+  - `SecurityConfig`：`addFilterAfter(RateLimitFilter, JwtAuthFilter.class)`。
+  - 配置（A4 口径：dev 宽松 / prod 严格）：`blms.rate-limit.{enabled,login-per-minute,write-per-minute}`；dev 默认 120/min（登录）+ 600/min（写）——**verify-ui 24 次登录 + 大量写不触发**（联调/演示零行为变化）；prod（application-prod.yml）10/min（登录，按 IP）+ 100/min（写，按用户）；`.env.example` 补 `RATE_LIMIT_*`。
+  - `SnapshotController.reset-demo`：补 `rateLimit.clearAll()`（与 A2 `lockout.clearAll()` 并列自恢复，避免某 IP/账号被限后影响后续场景）。
+  - 超限 → **429 + `Retry-After`（秒）+ `{ok:false, error:"请求过于频繁，请稍后再试", code:rate_limited}`**（前端 fetch 层不崩，仅该写失败）。
+- **验证**：
+  - 后端集成测试 +A3 断言（未超限放行 / 超限返回 Retry-After 1..60s / 不同维度独立 / 写档独立 / clearAll 自恢复）→ **PASS=168 FAIL=0**（原 163）。
+  - 运行中后端 E2E（真 HTTP，X-Forwarded-For 注入测试 IP `10.77.77.77` 不污染真实计数）：连发 121 次验证码 → 第 121 次 **429 Retry-After=59** `code=rate_limited`；真实 IP（127.0.0.1）不受假 IP 影响（admin 仍正常登录）；reset-demo 自恢复（清空后假 IP 重新放行 200）。
+  - 前端 **verify-ui 82/0**（A3 过滤器在真实 HTTP 路径上，24 次登录 + 大量写零误报，过滤器顺序/维度正确）。
+- **提交**：bulkhaul-server（本条，已推送）。
+
 ### Phase 2 架构（B1 / B3）— 2026-08-30
 
 #### B1 存储模型规范化（路 B）— done-verified ✅
@@ -309,7 +327,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **验证**：compose 结构/引用核对通过（build context 指向两仓库、healthcheck 顺序、env 占位符与 A4 一致）；**当前环境无 Docker daemon**，端到端 `docker compose up -d --build` 起栈验证待有 Docker 的机器执行（C1 done-verified 门槛）。
 - **提交**：server `88abe4a` + web `033335e` + docs（本条）已推送。
 
-> Phase 1 完成度：A1 ✅ / A2 ✅ / A4 ✅ / **A3 限流（P1，待做）** / A5 校验（P1，待做）。
+> Phase 1 完成度：A1 ✅ / A2 ✅ / A3 ✅ / A4 ✅ / **A5 校验（P1，待做）**。
 
 #### C2 后端 CI（GitHub Actions）— done（workflow 就绪，CI 运行验证待 push 触发）🔶
 - **实现**：
