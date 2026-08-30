@@ -30,9 +30,9 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 
 | 编号 | 类别 | 缺口 | 优先级 | 工作量 | 依赖 |
 |---|---|---|---|---|---|
-| A1 | 安全 | 行级数据权限服务端强制 | **P0** | 中 | B1（过滤实现方式） |
-| A2 | 安全 | 登录防爆破 + 锁定（服务端） | **P0** | 小 | — |
-| A4 | 安全 | 密钥/配置外置（生产 profile） | **P0** | 小 | — |
+| A1 | 安全 | 行级数据权限服务端强制 | **P0** ✅done | 中 | B1（过滤实现方式） |
+| A2 | 安全 | 登录防爆破 + 锁定（服务端） | **P0** ✅done | 小 | — |
+| A4 | 安全 | 密钥/配置外置（生产 profile） | **P0** ✅done | 小 | — |
 | C1 | 运维 | 部署工件（Dockerfile + compose） | **P0** | 中 | A4 |
 | C2 | 运维 | 后端 CI | **P0** | 小 | — |
 | B1 | 架构 | 存储模型决策（JSON blob → 规范化） | **P0** | 大 | — |
@@ -229,3 +229,48 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 ## 9. 进度记录
 
 （实现时按 Phase 追加：任务 → 改动文件 → 验证输出 → done-verified）
+
+### Phase 1 安全（A1 / A2 / A4）— 2026-08-30
+
+#### A1 行级数据权限服务端强制 — done-verified ✅
+- **决策（用户拍板）**：扩大范围——过滤所有含区域维度的集合，前端同步验证。
+- **实现**：
+  - 新增 `service/admin/DataScopeService.java`（114 行）：
+    - `scopeRegions()`：平台管理员→空（全量）；其余读 `dataScopes[username].regions`（空=全量）。
+    - `filter(coll, rows)`：O(n) 预建 4 张区域映射（终端 id→region / 合同 id→loadTerminalId / 调度 id→loadTerminalId / 调度 id→contractId）。
+    - 区域派生：dispatches/plans/contracts/transportRequests 直接 `loadTerminalId`；settlements 经 `contractId`；weighings 经 `dispatchId`（缺失再经其 contractId）。
+    - `inScope(coll, rec)`：单条判定（无区域归属的记录可见，防御口径）。
+  - `SnapshotController.snapshot()`：6 个区域集合过 `scope.filter`；其余集合与 logs 不过滤。
+  - `CollReadController`：`list` 过滤 + `one` 越权范围返回 `403 forbidden`。
+  - **不过滤（已论证）**：customers（region=省份 山西/陕西，非数据区域 华北/西北，过滤会全隐）、terminals（区域来源本身）、logs/messages（菜单/角色门控非区域维度）。
+  - **前端零改动**：db 由后端快照 hydrate，快照已按操作人过滤 → 所有视图自动行级生效；`visibleDispatches()` 变为幂等（db 已预过滤）。
+- **验证**：
+  - 后端集成测试 +18 断言（user02 华北真子集 / 计划/合同/结算行级 / 越权 403 / 平台管理员全量 / 快照端点过滤 / 守卫）→ **PASS=159 FAIL=0**（原 141）。
+  - 运行中后端 E2E：admin 202 调度单 vs user02 79（=华北装货侧 79，真子集）；plans 60→27 / contracts 40→16 / settlements 20→9 / weighings 365→149 / transportRequests 4→2；customers/logs 全量不过滤。
+  - 前端 **npm test 556/0** + **verify-ui 82/0**（环节8 行级过滤 UI 断言全绿：分页总数=华北数、顶栏/列表"数据范围：华北"标签）。
+- **提交**：bulkhaul-server `200743b`（已推送）。
+
+#### A2 登录防爆破服务端强制 — done-verified ✅
+- **决策（用户拍板）**：仅按用户名（Redis 按账号，5 次失败→锁 5 分钟，成功清零；对齐前端 M8 口径）。
+- **实现**：
+  - 新增 `auth/LoginLockoutService.java`（74 行）：Redis `login:fail:{user}`（计数，TTL 5 分钟滑动窗口）+ `login:lock:{user}`（锁定标记，TTL 5 分钟）；账号维度归一（trim+lowercase）；`clearAll()` 供演示自恢复。
+  - `AuthService.login`：前置锁定拦截（code=locked，含剩余秒数）→ 凭据失败计数（第 5 次触发锁定）→ 成功清零。
+  - `SnapshotController.resetDemo` 调 `lockout.clearAll()`：演示/测试自恢复（避免某账号被锁后影响后续场景登录）。
+  - 前端 `views/login/index.vue`：处理服务端 `code=locked`（强制本地锁定展示，文案用服务端）；本地 M8 计数保留原口径（凭据/验证码失败均计入，体验层），服务端为权威。
+- **验证**：
+  - 后端集成测试 +A2 断言（5 次触发锁定 / 剩余递减 4→1 / 成功清零 / 大小写空白归一不绕过）→ **PASS=159 FAIL=0**。
+  - 运行中后端 E2E：attempt1-4 credential（还剩 4/3/2/1 次）→ attempt5 locked（连续 5 次失败，已锁定 5 分钟）→ attempt6 locked（299 秒后可重试）；admin 不受影响。
+  - **verify-ui 82/0**（场景15 M8 本地锁定 + 环节9 验证码登录 全绿）。
+- **提交**：bulkhaul-server `200743b` + bulkhaul-manage-web `f5aace5`（均已推送）。
+
+#### A4 密钥/配置外置 — done-verified ✅
+- **实现**：
+  - `application.yml` 全部敏感项改环境变量占位符（`DB_URL/DB_USERNAME/DB_PASSWORD/REDIS_HOST/REDIS_PORT/JWT_SECRET/JWT_TTL_MINUTES/SERVER_PORT/SCHEDULER_AUTO_ENABLED/LOG_LEVEL_COM_BLMS`），保留 dev 默认值 → **dev/测试零行为变化**（mvn test 159/0 验证）。
+  - 新增 `.env.example`（生产环境变量模板，含 JWT_SECRET 生成提示 `openssl rand -base64 48`）。
+  - 新增 `application-prod.yml`（生产 profile：敏感项无 dev 默认，缺 env 即启动失败，避免误用演示密钥上线；scheduler 默认开）。
+  - `.gitignore` 忽略 `.env`。
+- **验证**：mvn test 全绿（占位符默认值生效）；生产部署路径 = 注入 env 变量 + `SPRING_PROFILES_ACTIVE=prod`。
+- **提交**：bulkhaul-server `200743b`（已推送）。
+
+> Phase 1 完成度：A1 ✅ / A2 ✅ / A4 ✅ / **A3 限流（P1，待做）** / A5 校验（P1，待做）。
+> 下一步按 P0 优先级：**C1 部署工件（Dockerfile+compose）** → C2 后端 CI → B1 存储模型（架构决定，影响 B2/B3）→ B3 并发。
