@@ -33,7 +33,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 | A1 | 安全 | 行级数据权限服务端强制 | **P0** ✅done | 中 | B1（过滤实现方式） |
 | A2 | 安全 | 登录防爆破 + 锁定（服务端） | **P0** ✅done | 小 | — |
 | A4 | 安全 | 密钥/配置外置（生产 profile） | **P0** ✅done | 小 | — |
-| C1 | 运维 | 部署工件（Dockerfile + compose） | **P0** | 中 | A4 |
+| C1 | 运维 | 部署工件（Dockerfile + compose） | **P0** 🔶工件就绪 | 中 | A4 |
 | C2 | 运维 | 后端 CI | **P0** | 小 | — |
 | B1 | 架构 | 存储模型决策（JSON blob → 规范化） | **P0** | 大 | — |
 | B3 | 架构 | 并发/冲突模型（乐观锁 / 多实例） | **P0** | 中 | B1 |
@@ -272,5 +272,17 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **验证**：mvn test 全绿（占位符默认值生效）；生产部署路径 = 注入 env 变量 + `SPRING_PROFILES_ACTIVE=prod`。
 - **提交**：bulkhaul-server `200743b`（已推送）。
 
+
+#### C1 部署工件（Dockerfile + compose 全栈）— done（工件就绪，端到端起栈验证待 Docker 环境）🔶
+- **实现**：
+  - `bulkhaul-server/Dockerfile`：Maven 多阶段（pom 预拉依赖层缓存 + -DskipTests）→ JRE 非 root 运行（8081，JAVA_OPTS 基线）+ `.dockerignore`。
+  - `bulkhaul-manage-web/Dockerfile`：node:20 构建 → nginx:1.27 托管 + `.dockerignore`。
+  - `bulkhaul-manage-web/deploy/nginx.conf.template`：官方镜像 envsubst 机制（BACKEND_UPSTREAM 占位符）；/api 反代后端（X-Forwarded-For/Proto）；SPA 兜底；gzip + hash 资源 30d 长缓存；HEALTHCHECK。
+  - `docker-compose.yml`（**workspace root**，两仓库公共父目录）：mysql:8 + redis:7 + backend + frontend，depends_on healthcheck 顺序编排（mysql/redis healthy → backend healthy → frontend）；敏感项经 env 注入（A4）；命名卷持久化。
+  - `.env.example`（root + docs 副本）+ `docs/deployment/`（README 部署指南 + compose/env 参考副本）。
+- **验证**：compose 结构/引用核对通过（build context 指向两仓库、healthcheck 顺序、env 占位符与 A4 一致）；**当前环境无 Docker daemon**，端到端 `docker compose up -d --build` 起栈验证待有 Docker 的机器执行（C1 done-verified 门槛）。
+- **提交**：server `88abe4a` + web `033335e` + docs（本条）已推送。
+
 > Phase 1 完成度：A1 ✅ / A2 ✅ / A4 ✅ / **A3 限流（P1，待做）** / A5 校验（P1，待做）。
+> Phase 2 运维：C1 🔶（工件就绪，起栈验证待 Docker 环境）/ **C2 后端 CI（P0，待做）** / B1 存储 / B3 并发。
 > 下一步按 P0 优先级：**C1 部署工件（Dockerfile+compose）** → C2 后端 CI → B1 存储模型（架构决定，影响 B2/B3）→ B3 并发。
