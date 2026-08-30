@@ -272,6 +272,32 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **验证**：mvn test 全绿（占位符默认值生效）；生产部署路径 = 注入 env 变量 + `SPRING_PROFILES_ACTIVE=prod`。
 - **提交**：bulkhaul-server `200743b`（已推送）。
 
+### Phase 2 架构（B1 / B3）— 2026-08-30
+
+#### B1 存储模型规范化（路 B）— done-verified ✅
+- **决策（用户拍板）**：路 B 彻底规范化（用户覆盖推荐的路 A——核心表全量拆列，非仅加索引）。
+- **实现**：
+  - 新增 `db/migration/V5__core_tables_normalize.sql`：7 核心表（biz_dispatches/contracts/plans/transportRequests/settlements/weighings/invoices）各加 `version INT NOT NULL DEFAULT 1` + `region VARCHAR(32) NULL` + `status` + 关键外键列（contract_id/load_terminal_id/dispatch_id/settlement_id）+ 索引（region/status/外键）；从 payload 回填 status+外键，region 经多级 JOIN（装货侧终端所在数据区域）回填。
+  - `DataStore.syncDerivedColumns(coll)`：commitAll 时回填 version/region/status/外键派生列（region 为派生列，经终端/合同/调度 JOIN 回填；无匹配保持 NULL = 无区域 → 数据范围可见，与 DataScopeService 防御语义一致）。
+- **验证**：mvn test **PASS=159 FAIL=0**（基线不变，派生列同步不影响业务逻辑）；region 回填为 A1 行级过滤（`WHERE region IN`）与 B2 分页提供 SQL 基础。
+- **提交**：bulkhaul-server `e5d390e`（已推送）。
+
+#### B3 并发/冲突模型（单实例 + 乐观锁）— done-verified ✅
+- **决策（用户拍板）**：单实例 + 乐观锁（version 字段，不匹配 → 409，前端处理 409"数据已变更，请刷新"）。
+- **实现**：
+  - 新增 `common/OptimisticLockContext.java`（请求级 ThreadLocal 期望版本，等价 Operator.current() 读 SecurityContext 的模式）+ `common/OptimisticLockException.java`（→409）+ `common/OptimisticLockSupport.java`（expectFromBody/expectFromQuery，controller 便捷入口）。
+  - `DataStore.commitAll()`：写锁内 drain 期望版本逐条比对——不匹配 → 先从 DB 恢复该记录为权威态（撤销本次孤儿改动，保持内存与 DB 一致）再抛 OptimisticLockException（→409）；匹配 → version+1 随 payload 持久化。未登记（直接 service 调用 / 定时任务 / 未参与乐观锁的写）→ 空 map → no-op（保持既有"最后写入胜出"）。
+  - `DataStore.ensureCoreVersions`：核心集合记录持久化前确保 payload 携带 version（运行时新建记录 V6 迁移覆盖不到，此处兜底）。
+  - `GlobalExceptionHandler`：补 OptimisticLockException → 409 conflict（此前缺失）。
+  - controller 接线：6 核心集合写端点登记 expectedVersion（dispatches：confirmLoad/accept/depart/arrive/confirmUnload/cancel/reassign/resume；contracts：change/extend/terminate/complete/archive；plans：cancel；settlements：startReconcile/recalc/customerConfirm/customerObjection/confirmSettle/recordPayment/revertPayment/applyPrepayment/dunning/issueInvoice/redFlush；weighings：correct）。无 body 端点用 `?expectedVersion` 查询参数，有 body 端点用 body.expectedVersion；缺省 → 不参与（兼容旧客户端 / 直接 service 调用）。
+  - 新增 `db/migration/V6__core_payload_version_seed.sql`：既有核心记录 payload 注入 version=1（缺失才注入，已有不覆盖）——前端经快照读 payload 的 version 发 expectedVersion；payload 无 version → 前端不发 → B3 不触发（本迁移补上端到端闭环）。
+  - 前端 `api/index.js`：afterWrite 对 6 核心集合写注入 expectedVersion（记录型读 a[0].version；weighing 按 id 查 db.weighings）；409（code=conflict）派发 `blms:conflict` window 事件（api 层不依赖 element-plus，保持 node 可测）。
+  - 前端 `main.js`：监听 `blms:conflict` → ElMessage.warning 展示后端文案（"数据已变更（…），请刷新后重试"）；1.5s 去抖避免 toast 叠加。
+- **验证**：
+  - 后端集成测试 +B3 断言（版本匹配 → 提交成功且 version 递增 / 不匹配 → OptimisticLockException（→409）/ **无静默覆盖**（DB 保持会话 A 权威态，非会话 B 覆盖）/ 恢复后基于新版本可继续提交）→ **PASS=163 FAIL=0**（原 159）。
+  - 运行中后端 E2E（真 HTTP，两会话改同一调度单 PD-00067）：会话 A（expectedVersion=1）200 version 1→2；会话 B（过期 expectedVersion=1）**409 conflict**"数据已变更（PD-00067 版本 1 → 2），请刷新后重试"；无静默覆盖（DB 保持会话 A 的 V001/D001 version 2，非会话 B 的 V005/D005）。
+  - 前端 **npm test 556/0** + eslint 0 + build 成功（api 层保持 node 可测）。
+- **提交**：bulkhaul-server + bulkhaul-manage-web（本条，已推送）。
 
 #### C1 部署工件（Dockerfile + compose 全栈）— done（工件就绪，端到端起栈验证待 Docker 环境）🔶
 - **实现**：
@@ -293,5 +319,5 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **验证**：workflow YAML 结构核对通过（service 端口/healthcheck/env 占位符与 A4 一致）；**CI 实际运行待 push 后 GitHub Actions 触发**（本环境无法触发远程 CI）。
 - **提交**：server `696521e`（已推送）。
 
-> Phase 2 运维：C1 🔶（工件就绪，起栈验证待 Docker 环境）/ C2 🔶（CI workflow 就绪，运行验证待 push 触发）/ **B1 存储模型（P0，架构决定，待拍板）** / B3 并发。
-> 下一步按 P0 优先级：**C1 部署工件（Dockerfile+compose）** → C2 后端 CI → B1 存储模型（架构决定，影响 B2/B3）→ B3 并发。
+> Phase 2：B1 ✅（路 B 规范化，V5 拆列 + 派生列同步）/ B3 ✅（单实例 + 乐观锁，version 不匹配 → 409 + 无静默覆盖）/ C1 🔶（工件就绪，起栈验证待 Docker 环境）/ C2 🔶（CI workflow 就绪，运行验证待 push 触发）。
+> 下一步按 P1 优先级：A3 全局限流 / A5 输入校验（@Valid DTO）/ B2 分页（依赖 B1 已就绪）/ C3 可观测性 / C4 服务端定时 / C5 CORS / D1 OpenAPI / D2 契约测试。
