@@ -221,7 +221,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 |---|---|---|
 | **B1 存储：路 A vs 路 B** | 最大单项决定，影响 A1/B2/B3 全部实现方式 + 后续报表/查询 | 路 A 先上线（快），路 B 按压力分批演进 |
 | **B3 并发：单实例+乐观锁 是否够用** | 取决于预期并发用户数 / 是否需水平扩展 | 先单实例+乐观锁；多实例需求明确再上分布式 |
-| **前端内存引擎退役** | 真产品多用户后，local-first 内存引擎与"服务端权威"冲突（见前序讨论） | 触发条件=真实多用户生产；届时引擎收进 demo 门控，主路径薄客户端化 |
+| **前端内存引擎退役（全量薄客户端化）** | 架构级：读路径从"快照 hydrate + 内存读"切到"按需 API 读"，flow.js（3720 行）整体退役；演示能力改由后端兜底 | **已拍板推进**（2026-09 讨论定稿）：演示数据后端化（seed_* + reset-demo 持久化）+ 双模式 flag 过渡 + 分 8 阶段实施，详见 §9 Phase 4 草案 |
 | **A5 校验改造范围** | 全量 DTO 化工作量大 | 先高频写端点，其余补显式必填校验 |
 
 ---
@@ -426,4 +426,63 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **提交**：bulkhaul-manage-web（本条，dev → master 单 commit）。
 
 > **Phase 3 完成度**：C4 ✅（服务端定时任务，Redis leader 租约单实例执行）/ C5 ✅（CORS 白名单默认拒绝跨域，Nginx 反代同源主拓扑）/ D1 ✅（springdoc OpenAPI 3.x + Swagger UI，dev 公开/生产认证，118 端点 schema）/ D2 ✅（API 契约测试，前端 97 W 端点 vs 后端 116 路由，CI 拦截漂移，红/绿路径均验证）。
-> **全部 15 项缺口**：A1✅ A2✅ A3✅ A4✅ A5✅(阶段一) / B1✅ B2✅(后端) B3✅ / **C1✅（WSL2 原生 Docker 端到端起栈验证通过，nginx 运行时 DNS 修复）** **C2✅（前后端 CI 实际运行全绿，web CI 契约路径修复）** C3✅ C4✅ C5✅ / D1✅ D2✅。**仅剩 B2 前端列表页改分页**（=内存引擎退役首步，§8 决策点待拍板——真实多用户生产时触发）。
+> **全部 15 项缺口**：A1✅ A2✅ A3✅ A4✅ A5✅(阶段一) / B1✅ B2✅(后端) B3✅ / **C1✅（WSL2 原生 Docker 端到端起栈验证通过，nginx 运行时 DNS 修复）** **C2✅（前后端 CI 实际运行全绿，web CI 契约路径修复）** C3✅ C4✅ C5✅ / D1✅ D2✅。**Phase 4 已拍板（2026-09）：阶段 0 重置持久化已完成（reset-demo 限管理员 + commitAll 回写 biz_* 持久化 + 前端 admin 门控 + AuditLog 冲突修复），阶段 1-7 待推进。**
+
+### Phase 4 全量薄客户端化（B2 前端 + 内存引擎退役）— 已拍板（2026-09 讨论整理；三点决策已定，自阶段 0 起实施）
+
+#### 背景与现状（代码核实，非估计）
+- **写路径已是薄客户端**：97 个写端点全部委托后端（`FlowCtx` 638 行 + `DispatchService` 510 / `ContractService` 565 / `SettlementService` 562 / `AdminService` 433 等；乐观锁 B3 / RBAC B1 / 审计 A1 均在服务端）。flow.js **不再承担业务逻辑**。
+- **读路径仍是 local-first**：`/api/snapshot` 一次性 hydrate 全量 34 集合进内存 → 之后所有读走内存。flow.js 现存 3720 行 / 263 处 db 读 = 读缓存 + 乐观 UI（点操作立即改本地，API fire-and-forget 200ms 防抖）+ 客户端聚合。
+- **前端消费面**：37 视图，**33 个直接读 `db.*`（180 处）**，29 个 import flow；本地聚合：`dashboard.js`（31 处 db 读）/ `report.js`（18 处）/ flow.js 展示派生值（结算量/车次成本等）。
+- **后端聚合逻辑已 1:1 搬完但未暴露**：`DashboardService`（93 行，kpi/safeDays，注释"与前端 dashboard.js 1:1"）+ `ReportService`（280 行，monthly/customer/commodity/terminal/cost 五报表，口径与前端一致）——**无任何 controller 引用**（缺的只是接线）。
+- **演示数据已持久化**：`seed_*` 只读快照表（V4 固化种子态，不受 `biz_*` 回写污染）+ `POST /api/admin/reset-demo`（内存重置 + 清防爆破/限流/leader 租约）+ 前端头像菜单按钮（现有）。
+- **数据模型**：每集合 = `(id, payload JSON)` + 少量派生列（B1 路 B）；跨集合关系在 payload 内 id 引用；**聚合是 Java 内存 join，非 SQL 多表 JOIN**（演示量级 202 调度单/40 合同/60 计划完全够快）。
+
+#### 决策 1：全量薄客户端化（内存引擎整体退役）
+- **终态**：前端 = 常规 CRUD 项目（页面 → 数据层 → /api），flow.js 退役；DB 为唯一权威，无客户端/服务端漂移，多用户读一致，行级范围每次请求服务端过滤。
+- **演示能力由后端兜底**（决策 2）：演示 = 连服务端 + 一键重置恢复演示版本，**放弃离线演示**（可接受：演示场景本就有服务端）。
+- **双模式过渡**：feature flag——演示模式 = 现有内存引擎（快照 hydrate + 本地引擎，现有 556 npm 断言 + 82 verify-ui E2E 继续有效）；生产模式 = 薄客户端。按页灰度切换，迁完翻转默认，最后移除引擎。
+
+#### 决策 2：演示数据重置持久化（Phase 4 前置，独立可交付）
+- **现状缺口**：`reset-demo` 只重置内存（接口 note 原话"仅内存/Redis，不回写 DB"）——旧架构下正确（内存权威），**薄客户端化后 DB 权威 → 重置不回写则重启后脏数据复活**。
+- **改动**：`reset-demo` 增加 `commitAll()`（种子态回写 `biz_*`，派生列同步）→ 重置 = **持久化恢复演示数据版本**；更新 note；补测试（重置后 `biz_* == seed_*`、重启后仍种子态）+ E2E（reset → snapshot 对比种子）。
+- **权限**：限**管理员角色**（`RequireAction`，演示用 admin 账号；非管理员 403）。
+- **前置验证（风险点）**：`seed_*` 是 V4 时点快照——若 V5/V6 后种子数据演进过（如 v5 客户运输需求 transportRequests），快照可能缺表/缺数据 → `tryLoadSeedFromSnapshot` 整体失败回退"启动时内存捕获"（脏库则演示版本被污染）。**动手前先核对 `seed_*` 覆盖全部 34 集合且与当前种子一致**；不一致 → 出新迁移重新固化快照。
+- **附带收益**：演示数据集从此**版本受控**（以后加演示场景 = 更新种子 + 迁移固化，重置即恢复新版本）。
+
+#### 决策 3：数据层 + 聚合端点（"常规 CRUD"的正确形态）
+- **不是"页面直接 import /api 各查各的"**（强交叉引用域会得到 N 并行请求 + 视图间不一致 + 无 loading/error 态 + 重复请求爆炸）。常规做法 = 先有数据层：
+  - **前端数据层**：`useCollection(name)` composable（fetch + 缓存 + 写后失效 + 乐观更新）——页面 import 数据层，不直接 fetch。
+  - **后端接线（薄）**：暴露 `DashboardService`/`ReportService`（逻辑已 1:1，只差 controller）。
+  - **详情聚合端点（真·补）**：详情页 join 7-8 集合（dispatch+vehicle+driver+plan+contract+weighing+settlement+exception）→ 新增 `GET /api/dispatch/{id}/detail`（Java 内存组装，非 SQL join）。
+  - **`/api/snapshot` 保留**：演示模式 hydrate / E2E 脚本 / 重置后整页重拉均用。
+- **SQL 下推不在本次范围**：数据量上到几万~十万行时内存聚合才需下推 SQL（抽派生列/视图/索引）——那是数据模型演进，不计入本次迁移成本。
+
+#### 分阶段实施（每阶段独立可交付 + 绿门槛：mvn test / npm test / verify-ui / E2E / 契约测试）
+0. **重置持久化**（独立，现架构下也正确）：核对 `seed_*` 完整性 → `reset-demo` 加 `commitAll()` → 测试 + E2E → 提交推送
+1. **后端接线**：dashboard/report controller + 详情聚合端点 + 测试（口径与前端 1:1 对拍）
+2. **前端数据层**：`useCollection` composable + 缓存/失效（尚不改视图）
+3. **列表页 → 分页**（B2，后端已就绪）——首个切生产模式的页面
+4. **详情视图**（跨 join）→ 详情聚合端点
+5. **看板/工作台** → dashboard/report 端点异步化
+6. **flow.js 门控**：feature flag 收进演示模式，主路径移除本地态/守卫（后端已权威）
+7. **测试套件重建**：556 npm 断言 + 82 verify-ui E2E 围绕 API mock / 真服务端；reset-demo 作为场景间前置恢复继续可用
+
+#### 成本与风险（修正后结构）
+- **主战场在前端**（数据层 + 33 视图 / 180 处 db 读迁移）；**后端轻**（接线 + 1-2 个聚合端点，逻辑已搬完）。
+- 37 视图 × 异步化 = 高回归风险 → 分阶段 + 每阶段绿门槛 + 双模式 flag 灰度（出问题时"重置 + 重拉"是干净逃生通道，演示模式随时可回退）。
+- 代价：离线演示能力丢失（演示需连服务端）；点击→往返延迟（WSL 几十 ms，生产可感知但可接受）；迁移期双套代码并存（flag 门控）。
+
+#### 决策（3 点，已拍板 2026-09）
+1. **重置权限**：✅ 限**平台管理员**（后端 `requireAction('admin')` + 前端 `can('admin')` 按钮门控；非管理员 403 兜底）。
+2. **双模式 flag 默认值**：✅ **过渡期演示模式默认**（现有内存引擎 + 556 npm / 82 verify-ui 继续有效），**切完列表页（阶段 3）后翻转**为生产模式默认，最后移除引擎。
+3. **起步顺序**：✅ **从阶段 0（重置持久化，独立低风险）开始**。
+
+#### 进度
+- **阶段 0 重置持久化（2026-08 完成）**：
+  - `V7__seed_core_payload_version.sql`：把 V6 的 `payload.version` 镜像到 `seed_*` 7 核心表（否则重置后 B3 乐观锁首写不触发）。
+  - `SnapshotController.resetDemo()`：`requireAction('admin')` 门控 → `resetToSeed()` → **`commitAll()` 回写 `biz_*`（持久化）** → 清防爆破/限流/leader 租约 → 审计日志；note 更新为"已回写 DB（持久化）"。
+  - 前端 `Navbar.vue`：重置按钮 `v-if="can('admin')"`（仅平台管理员可见）+ 调 `POST /admin/reset-demo` → 清本地快照残留 → `refreshDb()` 重拉种子态 → 整页刷新。
+  - 测试：`FlowIntegrationTest` 新增 `@Order(92) phase4_resetDemo_persist`（脏写→非管理员 403 不变→admin 重置→`biz_*` 持久化回种子→内存恢复→审计留痕）。
+  - **附带修复（既有缺陷）**：`AuditLog` 多 Spring 上下文共享 `op_log` 时 seq 落后 → 主键冲突（`DuplicateKeyException`，本地全量测试偶发红，CI Linux 顺序不同故绿）。改为冲突时从库内最大值 `resyncSeq()` 重同步 + 有界重试，与上下文创建顺序无关。
+  - 验证：后端 `mvn test` 28/28 绿（含 P4 + AuditLog 修复）/ 前端 `npm test` 556/0 / 契约 97/97 / `npm run build` 通过 / 运行栈 reset-demo admin 200（note 含 leader）+ user02 403 / verify-ui 主链路（确认装货）通过。
