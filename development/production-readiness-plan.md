@@ -34,7 +34,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 | A2 | 安全 | 登录防爆破 + 锁定（服务端） | **P0** ✅done | 小 | — |
 | A4 | 安全 | 密钥/配置外置（生产 profile） | **P0** ✅done | 小 | — |
 | C1 | 运维 | 部署工件（Dockerfile + compose） | **P0** ✅done | 中 | A4 |
-| C2 | 运维 | 后端 CI | **P0** 🔶workflow就绪 | 小 | — |
+| C2 | 运维 | 后端 CI | **P0** ✅done | 小 | — |
 | B1 | 架构 | 存储模型决策（JSON blob → 规范化） | **P0** | 大 | — |
 | B3 | 架构 | 并发/冲突模型（乐观锁 / 多实例） | **P0** | 中 | B1 |
 | A3 | 安全 | 全局限流 | P1 | 小 | A2 |
@@ -351,13 +351,13 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 
 > Phase 1 完成度：A1 ✅ / A2 ✅ / A3 ✅ / A4 ✅ / **A5 ✅（阶段一：3 个高频 create 端点 DTO 化，其余写端点分阶段推进）**。
 
-#### C2 后端 CI（GitHub Actions）— done（workflow 就绪，CI 运行验证待 push 触发）🔶
+#### C2 后端 CI（GitHub Actions）— done-verified ✅
 - **实现**：
   - `bulkhaul-server/.github/workflows/backend-ci.yml`：push/PR 到 master 触发；
     services `mysql:8`（建 blms_test 库 + healthcheck）+ `redis:7`（healthcheck）；JDK 17（temurin）+ Maven 依赖缓存；`mvn -B test`（Flyway V1-V4 建表灌种子 + 159 断言）；失败上传 surefire 报告。
   - `application-test.yml` 数据源改 `TEST_DB_*` 环境变量占位符（本地默认值不变，零行为变化）；CI 经 env 指向 service 容器。
-- **验证**：workflow YAML 结构核对通过（service 端口/healthcheck/env 占位符与 A4 一致）；**CI 实际运行待 push 后 GitHub Actions 触发**（本环境无法触发远程 CI）。
-- **提交**：server `696521e`（已推送）。
+- **验证（2026-09，GitHub Actions 实际运行）**：server `backend-ci` **8/8 全绿**（含最新 `d3dab8a`，push 自动触发，mvn test 全过）。**web `CI` 曾红两次**（`f593367`/`9fa02b9`）——根因：D2 契约步骤检出后端仓库到**子目录** `bulkhaul-server/`，原 `../bulkhaul-server` 指向仓库外（不存在）→ 后端路由 0 → 97 端点全判缺失 → 红。修复：CI 改 `./bulkhaul-server` + 脚本目录缺失显式报错 exit 2（web `39f5984`），**CI 转绿**。前后端 CI 均实际运行验证。
+- **提交**：server `696521e` + web `39f5984`（CI 路径修复）已推送。
 
 #### C3 可观测性（actuator + 结构化日志）— done-verified ✅
 - **实现**（actuator + 结构化 JSON 日志含 traceId；tracing/OTLP 可选，本环境无 collector 默认关）：
@@ -426,4 +426,4 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **提交**：bulkhaul-manage-web（本条，dev → master 单 commit）。
 
 > **Phase 3 完成度**：C4 ✅（服务端定时任务，Redis leader 租约单实例执行）/ C5 ✅（CORS 白名单默认拒绝跨域，Nginx 反代同源主拓扑）/ D1 ✅（springdoc OpenAPI 3.x + Swagger UI，dev 公开/生产认证，118 端点 schema）/ D2 ✅（API 契约测试，前端 97 W 端点 vs 后端 116 路由，CI 拦截漂移，红/绿路径均验证）。
-> **全部 15 项缺口**：A1✅ A2✅ A3✅ A4✅ A5✅(阶段一) / B1✅ B2✅(后端) B3✅ / **C1✅（WSL2 原生 Docker 端到端起栈验证通过，nginx 运行时 DNS 修复）** C2🔶（CI workflow 就绪，运行验证待 push 触发）C3✅ C4✅ C5✅ / D1✅ D2✅。剩余 C2 🔶（CI 运行验证）+ B2 前端列表页改分页（=内存引擎退役首步，§8 决策点待拍板）。
+> **全部 15 项缺口**：A1✅ A2✅ A3✅ A4✅ A5✅(阶段一) / B1✅ B2✅(后端) B3✅ / **C1✅（WSL2 原生 Docker 端到端起栈验证通过，nginx 运行时 DNS 修复）** **C2✅（前后端 CI 实际运行全绿，web CI 契约路径修复）** C3✅ C4✅ C5✅ / D1✅ D2✅。**仅剩 B2 前端列表页改分页**（=内存引擎退役首步，§8 决策点待拍板——真实多用户生产时触发）。
