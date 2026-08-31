@@ -507,3 +507,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
   - **E2E 两处既有敏感性修复（非本阶段回归，详见 lessons-learned §9）**：
     - 环节6（DND 标记）：消息列表按最新在前排序，定时任务生成的异常消息把唯一系统消息挤出第 1 页 → 断言前先按"系统"类型筛选（.filter-bar .el-select），标记断言与排序解耦；另标记依赖本地 db.dnd，需等 3s 定时任务快照刷新把已落库 dnd 同步回本地（200ms 防抖刷新可能早于 PUT 落库而回写种子态）。
     - 场景13（P2 在途）：验证后端须 SCHEDULER_AUTO_ENABLED=false（确定性，node 侧手动驱动 tick）；重建脚本误用生产默认 true → 后台 3s tick 把新在途车次转 exception。recreate_backend.sh/start_backend.sh 已固化 false。
+ - **阶段 4 调度详情生产模式（2026-08-31 完成，done-verified）**：
+   - views/dispatch/detail.vue 生产模式：PROD=isProduction() 时详情读面（dispatch/commodity/vehicle/driver/loadTerminal/unloadTerminal）onMounted/换单时 GET /api/dispatch/{id}/detail 单次往返取后端权威态（阶段 1 已建聚合端点，Java 内存组装非 SQL join）；写入仍走 flow（乐观改 detail.dispatch + afterWrite 落库，W 映射仅取 a[0].id 故端点对象兼容）；磅单读 db.weighings（flow 乐观 push + refreshDb 同步，与端点 weighings 同源）；时间线/打印 HTML 的场站引用同步改用端点派生 computed（loadTerminal/unloadTerminal）。不监听 blms:refreshed 重取，避免 200ms 防抖刷新早于 PUT 落库回写种子态覆盖乐观态（与阶段 3 同口径，导航时重取权威态）。
+   - E2E 场景 21（verify-ui）：生产模式（localStorage 覆盖）admin 登录 → 调度详情头部渲染调度单号 + 商品名（读面来自聚合端点）+ 磅单行数=后端该单磅单数（车牌断言按车辆口径条件触发，非公路车次跳过）共 4 断言。
+   - **阶段 4 绿门槛终验（2026-08-31，全绿）**：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **89/0**（场景 1-21 全绿，含场景 21 生产模式调度详情 4 断言；DEFAULT_MODE 已为 production，演示路径由 localStorage 未设 production 时回退覆盖，现有场景不受影响）。
