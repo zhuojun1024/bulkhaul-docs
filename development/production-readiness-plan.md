@@ -486,3 +486,24 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
   - 测试：`FlowIntegrationTest` 新增 `@Order(92) phase4_resetDemo_persist`（脏写→非管理员 403 不变→admin 重置→`biz_*` 持久化回种子→内存恢复→审计留痕）。
   - **附带修复（既有缺陷）**：`AuditLog` 多 Spring 上下文共享 `op_log` 时 seq 落后 → 主键冲突（`DuplicateKeyException`，本地全量测试偶发红，CI Linux 顺序不同故绿）。改为冲突时从库内最大值 `resyncSeq()` 重同步 + 有界重试，与上下文创建顺序无关。
   - 验证：后端 `mvn test` 28/28 绿（含 P4 + AuditLog 修复）/ 前端 `npm test` 556/0 / 契约 97/97 / `npm run build` 通过 / 运行栈 reset-demo admin 200（note 含 leader）+ user02 403 / verify-ui 主链路（确认装货）通过。
+- **阶段 1 后端接线（2026-08-31 完成，done-verified）**：
+  - DashboardService 扩展：commodityStructure / modeShare / terminalThroughput / vehicleStatus / workbenchStats（todayDispatches/todayLoad/todayUnload/monthSettled/yesterday*/prevMonthSettled）/ workbenchTodoList（contract/dispatch/exception/settlement/overdue 五类待办）。
+  - 新增 ReportController：GET /api/dashboard/kpi、/api/dashboard/charts（四图）、/api/workbench/stats、/api/workbench/todos、/api/report/monthly|customer|commodity|terminal|cost（五报表，ReportService 逻辑 1:1 暴露）。
+  - 新增 DispatchDetailService + GET /api/dispatch/{id}/detail：join dispatch+commodity+vehicle+driver+loadTerminal+unloadTerminal+weighings+contract+plan+settlements+exceptions，派生 settleQty/qualityDeduction（FlowCtx 口径）；不存在 404。
+  - 测试：Phase4AggregationTest（5 测试 / 39 断言，端点值 vs DataStore 独立重算对拍：kpi/charts/workbench/report/dispatchDetail 五组 parity）。
+  - 验证：mvn -o test 33/33 绿（Flow 18 PASS=184 + Phase4 5 PASS=39 + Validation 6 + Actuator 3 + Scheduler 1）；契约 97/97（新增 9 个读端点按读端点孤儿口径计，不红）。
+- **阶段 2 前端数据层（2026-08-31 完成，done-verified）**：
+  - src/composables/collectionStore.js：模块级 reactive 缓存（复合 key：name + 查询签名，同集合不同查询不串缓存）；getCollection/setRows/invalidate/invalidateMany/invalidateAllFor/optimisticUpdate/setLoading/setError/resetStore。
+  - src/composables/useCollection.js：useCollection(name, opts|()=>opts) → {data,loading,error,total,refresh,update,invalidate}；带 page → 服务端分页 {list,total}；不带 → 全量（可带 status/mode/keyword/dateFrom/dateTo 过滤）；node/演示（USE_API=false）镜像本地 db + 本地过滤（口径与后端 CollReadController.applyFilters 一致）。
+  - src/api/index.js：WRITE_COLL 域映射 + invalidateForWrite(fnName)（写后按域失效 + 复合 key 前缀失效）；refreshDb 成功后派发 blms:refreshed 事件（生产模式页面重取权威态）。
+  - 测试：scripts/verify-collection.mjs（20 断言：store 纯逻辑 10 + useCollection node 模式 10，含分页切片/复合 key 独立/过滤口径）；npm test 556/0 无回归。
+- **阶段 3 合同列表生产模式（2026-08-31 完成，done-verified）**：
+  - feature flag：src/mode.js——appMode()/isProduction()/setMode/clearModeOverride；localStorage blms_app_mode > 构建默认 DEFAULT_MODE（过渡期 demo；本阶段验证通过后翻转为 production，按决策 2）。
+  - 后端 /api/coll/{name} 扩展可选过滤（CollReadController.applyFilters）：status/mode 字段等值、keyword（id/name 子串，contracts 特例含发货方/收货方客户名，与前端 filtered 口径一致）、dateFrom/dateTo（signDate 区间）；无参向后兼容全量；FlowIntegrationTest B2 用例调用点同步 8 参签名。
+  - views/contract/list.vue 生产模式：PROD=isProduction() 时行/总数/过滤/分页全走 useCollection('contracts', ()=>({page,size,status,mode,keyword,dateFrom,dateTo,key:'contracts:list'})) 服务端权威；watch([page,pageSize,filter]) 重取 + blms:refreshed 重取；演示模式（默认）保持本地 filtered/paged 客户端分页（现有断言不变）；交叉引用列（find.*）经启动 hydrate 的本地 db 渲染（生产模式仍 hydrate，db 供交叉引用）。
+  - E2E 场景 20（verify-ui）：生产模式（localStorage 覆盖）admin 登录 → 合同列表分页总数=后端全量、交叉引用列渲染客户名、状态 chip 过滤总数=后端过滤数（服务端分页+过滤+交叉引用三断言）。
+  - 验证：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / npm run build 通过 / 运行栈端点实测（full 40、paged total=40 list=5、status=executing 15=15、keyword=HT 40=40、date2026 34=34、paged+status total=15、客户名 keyword 4=4）/ verify-ui 含场景 20 全绿。DEFAULT_MODE 翻转为 production（决策 2：切完列表页后翻转）。
+  - **阶段 3 绿门槛终验（2026-08-31，全绿）**：DEFAULT_MODE 翻转为 production 后复跑全部门槛——verify-ui **85/0**（场景 1-20 全绿，含场景 20 生产模式三断言；场景 6 合同运输需求页签/979 详情不受翻转影响，因仅合同列表页 opt-in isProduction）/ npm test 556/0 / test:collection 20/0 / 契约 97/97 / build 通过。
+  - **E2E 两处既有敏感性修复（非本阶段回归，详见 lessons-learned §9）**：
+    - 环节6（DND 标记）：消息列表按最新在前排序，定时任务生成的异常消息把唯一系统消息挤出第 1 页 → 断言前先按"系统"类型筛选（.filter-bar .el-select），标记断言与排序解耦；另标记依赖本地 db.dnd，需等 3s 定时任务快照刷新把已落库 dnd 同步回本地（200ms 防抖刷新可能早于 PUT 落库而回写种子态）。
+    - 场景13（P2 在途）：验证后端须 SCHEDULER_AUTO_ENABLED=false（确定性，node 侧手动驱动 tick）；重建脚本误用生产默认 true → 后台 3s tick 把新在途车次转 exception。recreate_backend.sh/start_backend.sh 已固化 false。
