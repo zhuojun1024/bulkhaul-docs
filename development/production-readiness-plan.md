@@ -33,7 +33,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 | A1 | 安全 | 行级数据权限服务端强制 | **P0** ✅done | 中 | B1（过滤实现方式） |
 | A2 | 安全 | 登录防爆破 + 锁定（服务端） | **P0** ✅done | 小 | — |
 | A4 | 安全 | 密钥/配置外置（生产 profile） | **P0** ✅done | 小 | — |
-| C1 | 运维 | 部署工件（Dockerfile + compose） | **P0** 🔶工件就绪 | 中 | A4 |
+| C1 | 运维 | 部署工件（Dockerfile + compose） | **P0** ✅done | 中 | A4 |
 | C2 | 运维 | 后端 CI | **P0** 🔶workflow就绪 | 小 | — |
 | B1 | 架构 | 存储模型决策（JSON blob → 规范化） | **P0** | 大 | — |
 | B3 | 架构 | 并发/冲突模型（乐观锁 / 多实例） | **P0** | 中 | B1 |
@@ -339,15 +339,15 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **前端（待拍板）**："列表页改走分页端点（不再拉全量）"= **前端内存引擎退役的首步**（§8 决策点：触发条件=真实多用户生产，届时引擎收进 demo 门控、主路径薄客户端化）。当前前端为 local-first 内存引擎（`/api/snapshot` hydrate 全量 34 集合 → 客户端分页 `filtered.slice`，详情/交叉引用/流程引擎依赖全量内存态）。改列表页走分页端点需薄客户端化列表视图（分页加载 + 详情按需取单条），属架构级改动，**不随 B2 后端默认推进**。
 - **提交**：bulkhaul-server（本条，已推送）。
 
-#### C1 部署工件（Dockerfile + compose 全栈）— done（工件就绪，端到端起栈验证待 Docker 环境）🔶
+#### C1 部署工件（Dockerfile + compose 全栈）— done-verified ✅
 - **实现**：
   - `bulkhaul-server/Dockerfile`：Maven 多阶段（pom 预拉依赖层缓存 + -DskipTests）→ JRE 非 root 运行（8081，JAVA_OPTS 基线）+ `.dockerignore`。
   - `bulkhaul-manage-web/Dockerfile`：node:20 构建 → nginx:1.27 托管 + `.dockerignore`。
   - `bulkhaul-manage-web/deploy/nginx.conf.template`：官方镜像 envsubst 机制（BACKEND_UPSTREAM 占位符）；/api 反代后端（X-Forwarded-For/Proto）；SPA 兜底；gzip + hash 资源 30d 长缓存；HEALTHCHECK。
   - `docker-compose.yml`（**workspace root**，两仓库公共父目录）：mysql:8 + redis:7 + backend + frontend，depends_on healthcheck 顺序编排（mysql/redis healthy → backend healthy → frontend）；敏感项经 env 注入（A4）；命名卷持久化。
   - `.env.example`（root + docs 副本）+ `docs/deployment/`（README 部署指南 + compose/env 参考副本）。
-- **验证**：compose 结构/引用核对通过（build context 指向两仓库、healthcheck 顺序、env 占位符与 A4 一致）；**当前环境无 Docker daemon**，端到端 `docker compose up -d --build` 起栈验证待有 Docker 的机器执行（C1 done-verified 门槛）。
-- **提交**：server `88abe4a` + web `033335e` + docs（本条）已推送。
+- **验证（2026-09，WSL2 原生 Docker 端到端起栈）**：WSL2（Ubuntu 24.04 + systemd）装 **Docker Engine 29.7.2**（static bundle，systemd 托管，daemon 配 HTTP(S)_PROXY 拉镜像）+ **compose v2 v5.5.0**（CLI plugin）+ **iptables/nftables**（WSL 缺，bridge NAT 必需）。`docker compose up -d` 全栈起：**mysql:8 + redis:7 + backend + frontend 四容器全 healthy**；后端 `/api/health` `db:connected tables:105`、actuator UP、**Flyway V1-V6 已应用**、OpenAPI 200；**前端 nginx 托管 Vue + `/api` 反代后端 200**（验证码真实返回）。**修掉一个真实 bug**：`nginx.conf.template` 原 `upstream` 块在 nginx **启动时**用系统 DNS 解析 `backend`（Docker/WSL2 下易超时失败 → `host not found in upstream` → nginx emerg 退出）→ 改 **`resolver 127.0.0.11` + 变量 upstream 运行时解析**（web `9fa02b9`）。注：本环境 8080 被宿主推理服务占用，本地 compose 副本改 8082 验证（仓库保持 8080 默认）。
+- **提交**：server `88abe4a` + web `033335e` + **web `9fa02b9`（nginx 运行时 DNS 修复）** + docs（本条）已推送。
 
 > Phase 1 完成度：A1 ✅ / A2 ✅ / A3 ✅ / A4 ✅ / **A5 ✅（阶段一：3 个高频 create 端点 DTO 化，其余写端点分阶段推进）**。
 
@@ -426,4 +426,4 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - **提交**：bulkhaul-manage-web（本条，dev → master 单 commit）。
 
 > **Phase 3 完成度**：C4 ✅（服务端定时任务，Redis leader 租约单实例执行）/ C5 ✅（CORS 白名单默认拒绝跨域，Nginx 反代同源主拓扑）/ D1 ✅（springdoc OpenAPI 3.x + Swagger UI，dev 公开/生产认证，118 端点 schema）/ D2 ✅（API 契约测试，前端 97 W 端点 vs 后端 116 路由，CI 拦截漂移，红/绿路径均验证）。
-> **全部 15 项缺口**：A1✅ A2✅ A3✅ A4✅ A5✅(阶段一) / B1✅ B2✅(后端) B3✅ / C1🔶 C2🔶 C3✅ C4✅ C5✅ / D1✅ D2✅。剩余 C1/C2 🔶（Docker 起栈 / CI 运行验证，待环境）+ B2 前端列表页改分页（=内存引擎退役首步，§8 决策点待拍板）。
+> **全部 15 项缺口**：A1✅ A2✅ A3✅ A4✅ A5✅(阶段一) / B1✅ B2✅(后端) B3✅ / **C1✅（WSL2 原生 Docker 端到端起栈验证通过，nginx 运行时 DNS 修复）** C2🔶（CI workflow 就绪，运行验证待 push 触发）C3✅ C4✅ C5✅ / D1✅ D2✅。剩余 C2 🔶（CI 运行验证）+ B2 前端列表页改分页（=内存引擎退役首步，§8 决策点待拍板）。
