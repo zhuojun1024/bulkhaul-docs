@@ -523,3 +523,13 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - 保留项（按经验定，非遗漏）：①状态机守卫（doXxx 内 status 校验）两模式均保留为乐观前置（即时反馈 + 避免无效落库）；②本地乐观变更两模式均保留——E2E 主链路依赖其即时 UI 反馈（后端 commitAll ~2.3s，200ms 防抖刷新早于落库，须靠乐观变更保证写后状态可见；scheduler 关闭的验证栈下无 tick 兜底）；③司机端身份守卫 requireDriverApp 独立于 requireAction，不随本门控跳过（后端 DispatchService.requireDriverApp 同样权威执行）。
     - 验证：mvn -o test 33/33 / npm test 556/0（node 模式 RBAC 守卫断言全绿）/ npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0**（场景 1-22 全绿；生产模式写路径经后端权威 RBAC，本地拦截跳过不影响 E2E 断言——E2E 无状态机守卫错误消息断言，RBAC 经菜单/路由守卫断言）。
     - **阶段 6 绿门槛终验（2026-08-31，全绿）**：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0
+  - **阶段 7 测试套件重建（2026-08-31 完成，done-verified）**：
+    - 测试套件结构（围绕 API mock / 真服务端）：
+      - npm test（556 断言，node 模式 USE_API=false）：本地内存引擎自洽（API mock 等价物），覆盖状态机/结算/收款/安全/合同/计划/商品/客户/司机/车辆/库存/用户/角色/场站/仓库/银行流水等 21 个环节；RBAC 守卫断言依赖本地 requireAction（node 模式守卫生效，阶段 6 门控不影响）。
+      - verify-ui E2E（95 断言，23 场景 0-22，真服务端）：场景 0-19 演示模式（内存引擎 + 本地 RBAC）+ 场景 20-22 生产模式（薄客户端，localStorage 覆盖 isProduction）；场景 0 = reset-demo 重置后端回种子态（commitAll 污染防护，场景间前置恢复）。
+      - test:collection（20 断言，node 模式）：useCollection 数据层纯逻辑 + node 模式镜像。
+      - test:contract（97/97）：前后端契约一致性（GET 端点读孤儿不计入）。
+    - reset-demo 作为场景间前置恢复：E2E 场景 0 调 POST /api/admin/reset-demo（admin 门控 → resetToSeed → commitAll → 清 lockout/rateLimit/leader）→ 后端回种子态 → 后续场景在干净态运行；阶段 0 已实现（FlowIntegrationTest @Order(92) phase4_resetDemo_persist）。
+    - 验证：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0**（场景 0-22 全绿，含场景 0 reset-demo 前置恢复 + 场景 20-22 生产模式薄客户端）。
+    - **内存引擎移除（终态，非本阶段范围）**：flow.js（3720 行）整体退役是 Phase 4 的**终态目标**（决策 1"最后移除引擎"），前提是**全部 33 视图迁完生产模式**（当前 4/33：contract/list、dispatch/detail、dashboard/monitor、dashboard/workbench）。剩余 29 视图仍读本地 db（快照 hydrate + 内存读），移除引擎将破坏这些视图 + npm 556 断言（node 模式本地引擎是唯一路径）+ E2E 场景 0-19（演示模式依赖本地引擎）。**内存引擎移除 = 独立后续任务**（需先迁完 29 视图 + 重建 npm 测试套件围绕 API mock），不计入 Phase 4 阶段 7。
+    - **阶段 7 绿门槛终验（2026-08-31，全绿）**：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0
