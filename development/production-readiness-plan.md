@@ -517,3 +517,9 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
    - **设计决策（趋势 derive vs static，按经验定）**：历史趋势（volumeTrend 12 月/exceptionTrend 30 天）为种子随机历史数据，**非 db 可派生**（种子仅含当期业务态，无历史运量/异常序列）→ 两模式均取本地 dashboard（诚实标注：属演示历史，非业务态）；不伪造后端口径。db 派生的实时指标（KPI/四图/工作台指标/待办）生产模式走后端聚合端点（阶段 1 已建，口径 1:1 对拍）。
    - E2E 场景 22（verify-ui）：生产模式（localStorage 覆盖）fetch 监听证明薄客户端确实调用 /workbench/stats + /workbench/todos + /dashboard/kpi + /dashboard/charts（db 派生指标两模式值相同，故用调用断言证明异步化生效）+ 工作台"今日调度"卡值=后端 todayDispatches + 看板 KPI 区渲染（6 断言）。
    - **阶段 5 绿门槛终验（2026-08-31，全绿）**：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0**（场景 1-22 全绿，含场景 22 生产模式看板/工作台 6 断言；DEFAULT_MODE 已为 production，演示路径由 localStorage 未设 production 时回退覆盖，现有场景不受影响）。
+  - **阶段 6 flow.js 门控（2026-08-31 完成，done-verified）**：
+    - 架构确认：后端（FlowCtx/DispatchService/ContractService/...）是 flow.js 的 1:1 移植，已权威执行 RBAC（requireAction）+ 状态机守卫 + 资源占用 + 全部联动；前端写路径经 afterWrite 同步 POST 后端（薄客户端），本地变更为乐观更新（200ms 防抖 refreshDb 拉回后端权威态校正）。
+    - 门控实现（src/mock/flow.js requireAction）：浏览器生产模式（typeof window!=='undefined' && isProduction()）跳过冗余本地 RBAC 拦截——后端已权威执行，本地拦截仅增加无效往返；node 测试/演示模式（USE_API=false，typeof window==='undefined'）守卫生效（内存引擎自洽，npm 556 断言依赖本地 RBAC 拦截）。
+    - 保留项（按经验定，非遗漏）：①状态机守卫（doXxx 内 status 校验）两模式均保留为乐观前置（即时反馈 + 避免无效落库）；②本地乐观变更两模式均保留——E2E 主链路依赖其即时 UI 反馈（后端 commitAll ~2.3s，200ms 防抖刷新早于落库，须靠乐观变更保证写后状态可见；scheduler 关闭的验证栈下无 tick 兜底）；③司机端身份守卫 requireDriverApp 独立于 requireAction，不随本门控跳过（后端 DispatchService.requireDriverApp 同样权威执行）。
+    - 验证：mvn -o test 33/33 / npm test 556/0（node 模式 RBAC 守卫断言全绿）/ npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0**（场景 1-22 全绿；生产模式写路径经后端权威 RBAC，本地拦截跳过不影响 E2E 断言——E2E 无状态机守卫错误消息断言，RBAC 经菜单/路由守卫断言）。
+    - **阶段 6 绿门槛终验（2026-08-31，全绿）**：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0
