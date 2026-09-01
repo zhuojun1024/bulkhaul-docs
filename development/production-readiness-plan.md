@@ -563,3 +563,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - **批次 2b 模式修正**：初版详情页把关联集合也切 useCollection，导致 E2E 场景 17（结算详情预付款抵扣写后断言）超时——useCollection 缓存不反映 flow.js 乐观变更（写 db.payments），且 200ms 防抖 refreshDb 早于后端 commitAll 落库拉回旧态。修正为关联集合回退本地 db（与 dispatch/detail 基准一致），主记录保留后端单条端点。
     - **关键模式沉淀**：详情页 = 主记录后端单条端点 + 关联集合本地 db（乐观变更即时可见）；列表页 = 全量 useCollection + blms:refreshed 重取（无同页写后断言）。两类页面读路径策略不同，不可混用。
     - **批次 2c 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（含场景 17 预付款抵扣写后断言）
+  - **Phase 4 灰度批次 4a：report 报表中心 + system/role 角色管理切生产模式（2026-08-31 完成，done-verified）**：
+    - report：5 张报表（月度运营/客户经营/商品运量/场站吞吐/成本利润）生产模式读后端 /api/report/*（ReportController 只读聚合端点，与 @/mock/report 1:1 口径，集成测试对拍防漂移）；演示模式回退本地 report.js。报表页只读、无写后断言，直接后端聚合（不经 useCollection 集合）。
+    - system/role：角色列表读后端 /api/coll/roles（useCollection + blms:refreshed 重取）；users（角色下用户数实时统计）/rolePerms（权限对象，真实读写）交叉引用保留本地。
+    - **批次 4a 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（后端自批次 1 未变，mvn 33/33 沿用）
