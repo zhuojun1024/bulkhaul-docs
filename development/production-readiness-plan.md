@@ -627,3 +627,4 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 - 批次 F（引擎移除终态）：全部视图绕过 flow.js 后 → 删除 flow.js 状态机 + 种子生成 + 前端本地调度 tick；npm 556 套件围绕 API mock 重建；E2E 0-19 写后断言改 waitForBackend（后端权威）。
 - **进度（2026-09）**：批次 A（dispatch 域 15）+ 批次 B（contract 域 22：list 12 + detail 9 + create 1）完成，累计 37/116 写操作后端权威。build OK / E2E 95/0（场景6 需求转合同/场景16 改价审批/场景20 服务端分页走真后端）/ npm 556/0 全绿。
   - 批次 B 提交：ec5eccf（contract/list.vue + contract/detail.vue + contract/create.vue）。prodCall（列表页，refreshDb）/ prodWrite（详情页，refreshDb+loadDetail）两模式确立，后端返回形（id/final/step/changed/changes/billNo/status）与 flow 同形，UI 消息文案不变。
+  - 批次 C（settlement 域 20：list 9 + detail 9 + invoice 2）完成，累计 57/116 写操作后端权威。提交：见 git log。build OK / E2E 95/0（场景4 客户确认对账/场景11 自动核销/场景17 预付款抵扣走真后端）/ npm 556/0 全绿。
