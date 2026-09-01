@@ -633,3 +633,12 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - **关键修复 2（司机端 RBAC 403）**：司机端扫码/发车/到达/签收端点经 requireDriverApp 守卫后委托核心方法（confirmLoad/depart/arrive/confirmUnload），核心各自 requireAction("dispatch")，司机角色无该 action → 403。此前 afterWrite 火后不管（403 仅 console.warn，乐观 UI 已推进）被掩盖；prodWrite 等待 POST 后暴露。修复：抽取 doConfirmLoad/doDepart/doArrive/doConfirmUnload 私有核心（无 RBAC），公共方法保留 requireAction+commit 委托核心，司机端方法直调核心+commit；reportException 角色感知（司机→requireDriverApp source=driver / PC→requireAction exception）+ 补 commit。mvn 33/0。
     - **关键修复 3（返回形状）**：startReconcile 的 diffCount 嵌套在 reconciliation 内、recordPayment 返回 amount（非 real）、supplementReceipt 返回 receipt.code（非 code）——UI 消息取值已对齐。
     - 门禁：npm 556/0 · build OK · E2E 95/0（场景14 司机全链路扫码走真后端）· mvn 33/0。
+  - 批次 E（exception + system + message + safety + portal 域 27：exception/list 4 + system/user 5 + system/role 3 + message/index 3 + safety/index 9 + portal/index 3）完成，累计 113/116 写操作后端权威。提交：web 54f3eb6。
+    - exception/list：恢复运输/受理/处置完成/关闭归档（refreshDb，联动 dispatches/settlements/accidents/vehicles）。
+    - system/user：数据范围(PUT dataScope)/重置密码/启停/删除(DELETE)/新增编辑（refreshDb 联动 dataScopes OBJ_COLL）。
+    - system/role：权限(PUT {name}/perms)/新增/删除(DELETE {id})（refreshDb 联动 rolePerms OBJ_COLL）。
+    - message/index：标记已读/全部已读(r.data.count)/免打扰(PUT /admin/dnd)（loadMessages 重取）。
+    - safety/index：事故登记/结案/报险/定责核定/理赔结案(offsetSettlement)/拒赔/培训计划/完成/检查登记（refreshDb 水合 accidents/trainings/inspections/insurance）。
+    - portal/index：发起运输需求/确认对账/客户异议（refreshDb 水合 transportRequests/settlements）。
+    - 门禁：npm 556/0 · build OK · E2E 95/0。
+    - **剩余 3 个非状态机写**：login/index.vue 的 setOperator（会话初始化，非业务写）、track/index.vue 的 trackPointsOf/maxDeviationOf/hashOffset/visibleDispatches/dataScopeOf（纯派生读）。116 写操作清单中 113 已切后端权威，其余 3 为会话/派生读，不属状态机写操作。
