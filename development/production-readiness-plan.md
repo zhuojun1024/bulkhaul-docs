@@ -651,7 +651,11 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
   - **结论**：批次 F 终态（删 flow.js 状态机 + 种子 + 本地 tick + npm 套件围绕 API mock 重建 + E2E 0-19 改 waitForBackend）为大型高风险工程，须分阶段、每阶段绿门槛 + commit，不宜单次自主完成。当前写路径移除已完成，为批次 F 的前置条件（全部视图生产模式绕过 flow.js 写路径）。
 
   **批次 F 分阶段执行计划（每阶段绿门槛 + commit，可回滚）**：
-  - **F1（关键路径，先行）**：npm test 套件围绕 API mock 重建。现状 verify-flow.mjs 3149 行/556 断言直测 flow.js 内存逻辑；该逻辑已下沉后端（mvn 33 + E2E 95 已覆盖），npm 套件与后端测试大量冗余。重建为精简 API 层/集成冒烟（api() 客户端 + 关键写流程对 mock/真后端断言），规模 ~100-300 行。门槛：新 npm 套件绿。**这是引擎可移除的前提（npm 套件是"护城河"，须先拆）。**
+  - **F1（关键路径，先行）完成**：薄客户端 API 层测试套件 verify-api.mjs（35 断言）落地，additive 不动既有 verify-flow。提交：web 98fa5b9。
+    - api/index.js 导出 W 端点契约（~90 端点 method/path/body，此前不可单测）。
+    - verify-api.mjs 覆盖：W 契约全端点形状 + 关键端点路径精确断言（与后端 Controller 映射一致）；api() 客户端（token 注入/无 token/401 清登录态/网络错误 code:network/非 JSON code:bad-response/body 序列化）；refreshDb()（数组 splice 保响应式身份/对象集合合并清旧键/日志时间归一/快照失败不污染 db）；afterWrite() node 态 no-op。
+    - package.json 新增 test:api 脚本。门禁：npm 556/0 · test:api 35/0 · build OK · E2E 95/0。
+    - **F1 后引擎移除的剩余关键路径**：flow.js 被 29 视图 + 5 个 .js 模块导入，视图同时导入写函数（仅 demo 用）与纯派生读函数（PROD 仍在用：report/track/message/settlement/scheduler/store/main/login）。故 F2/F3 须先把纯派生读函数从 flow.js 抽出到独立模块，视图改从新模块导入并删除写函数导入，flow.js 状态机方可整体删除。
   - **F2**：移除演示模式（mode.js demo 分支 + 各视图 if(!PROD) flow 乐观分支 + login 演示切换）。门槛：build + E2E 95 绿。
   - **F3**：移除种子生成（mock/*.js 种子）+ flow.js 状态机写函数 + 前端本地调度 tick（runTickLocal + 5 心跳函数）。保留 flow.js 纯派生读函数（report/track/message/settlement/scheduler 生产仍在用，非"引擎"）。门槛：build + E2E + 新 npm 绿。
   - **F4**：E2E 场景 0-19 写后断言改 waitForBackend（后端权威，替代本地乐观态断言）。门槛：E2E 绿。
