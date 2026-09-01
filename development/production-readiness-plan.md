@@ -593,3 +593,36 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - driver-app：司机全链路写操作（接单→扫码装货→发车→到达→扫码卸货签收，场景 14）强耦合本地乐观态，需引擎移除阶段重写为后端状态机 + 写后重取。
     - document：派生模块 @/mock/document（无独立后端端点），需后端单证聚合端点或引擎移除阶段随快照派生。
   - **⚠️ 推送状态（2026-08-31）**：批次 4e 的 web（4e commit）+ server（fenceConfig 端点）commit 已落本地，GitHub 网络瞬时不可达（port 443 连接失败），待网络恢复后补推。docs 计划文档同步本地提交。
+
+---
+
+### 引擎移除阶段（Phase 4 终态，2026-09 启动）
+
+> 目标：移除内存引擎（flow.js 状态机 + 种子数据 + 前端本地调度 tick），写路径纯后端权威；
+> npm 测试套件围绕 API mock 重建、E2E 场景 0-19 围绕生产模式/真服务端重建。
+
+**核心架构判断（已验证）**：
+- 生产模式下本地 db 由 /api/snapshot hydrate，派生模块（document.js/dashboard.js 只 import db+utils，不依赖 flow.js）已实际读后端数据 → 引擎移除后随快照 hydrate 存活。
+- 当前生产模式读=薄客户端（useCollection/聚合端点），写=厚客户端（flow 乐观改本地态 + afterWrite fire-and-forget POST）。
+- 引擎移除 = 写路径从"乐观本地变更"改为"后端权威 api POST + 写后重取"，后端为完整状态机（doConfirmLoad 等等价前端，联动磅单/计划/结算）。
+- 后端 DispatchService.doConfirmLoad 等已确认是完整状态机（非薄转发），UI 可完全依赖后端。
+
+**已确立的转换模式（pilot 验证全绿）**：
+- 详情页：prodWrite(path, msg, body) = await api('POST', path, body) → 失败 ElMessage.error 返回 false → 成功 await refreshDb()（后端已提交，无竞态；联动集合 + 派发 blms:refreshed）+ await loadDetail() 重取权威详情。
+- 列表页：prodWrite = await api POST → 成功 await listCol.refresh()（列表已监听 blms:refreshed）。
+- 所有写 handler 保留 if (PROD) { await prodWrite(...); return } 分支，演示模式（PROD=false）保留 flow 乐观态 → npm 556 套件（verify-flow 直测 flow.js）不受影响，E2E 走 PROD 新路径。
+- 写端点 body 形状与 api/index.js W 映射一致（cancel={reason} / reassign={vehicleId,driverId} / reportException={description,type,level} / supplementReceipt={signer,reason}）。
+
+**全量写操作清单（116 个 flow 写函数调用点 / 27 个视图）**：
+- [x] dispatch/detail.vue（7：confirmLoad/depart/arrive/confirmUnload/reportException/resumeDispatch/supplementReceipt）— 试点 ff2c144
+- [x] dispatch/list.vue（8：+cancelDispatch/reassignDispatch）— 批次 A 55eeb0f
+- [ ] 待转换（25 视图）：contract/list(12) contract/detail(9) contract/create(1) settlement/list(9) settlement/detail(9) settlement/invoice(2) plan/list(2) plan/detail(1) plan/create(1) driver/app(9) driver/list(3) vehicle/list(3) commodity/list(3) customer/list(2) customer/detail(1) terminal/list(1) terminal/weighing(2) warehouse/list(1) warehouse/inventory(3) exception/list(4) system/user(5) system/role(3) message/index(3) safety/index(9) portal/index(3)
+
+**分步计划（每步绿门槛 mvn/npm 556/collection 20/契约 97/build/verify-ui 95 + commit）**：
+- 批次 A（dispatch 域，完成）：detail 7 + list 8 = 15 写操作后端权威。
+- 批次 B（contract 域）：list 12 + detail 9 + create 1 = 22。
+- 批次 C（settlement 域）：list 9 + detail 9 + invoice 2 = 20。
+- 批次 D（plan + driver + 基础数据）：plan/list 2 + plan/detail 1 + plan/create 1 + driver/app 9 + driver/list 3 + vehicle/list 3 + commodity/list 3 + customer/list 2 + customer/detail 1 + terminal/list 1 + terminal/weighing 2 + warehouse/list 1 + warehouse/inventory 3 = 29。
+- 批次 E（exception + system + message + safety + portal）：exception/list 4 + system/user 5 + system/role 3 + message/index 3 + safety/index 9 + portal/index 3 = 27。
+- 批次 F（引擎移除终态）：全部视图绕过 flow.js 后 → 删除 flow.js 状态机 + 种子生成 + 前端本地调度 tick；npm 556 套件围绕 API mock 重建；E2E 0-19 写后断言改 waitForBackend（后端权威）。
+- **进度（2026-09）**：批次 A 完成（dispatch 域 15 写操作），build OK / E2E 95/0 / npm 556/0 全绿。
