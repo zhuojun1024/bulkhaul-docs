@@ -642,3 +642,10 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - portal/index：发起运输需求/确认对账/客户异议（refreshDb 水合 transportRequests/settlements）。
     - 门禁：npm 556/0 · build OK · E2E 95/0。
     - **剩余 3 个非状态机写**：login/index.vue 的 setOperator（会话初始化，非业务写）、track/index.vue 的 trackPointsOf/maxDeviationOf/hashOffset/visibleDispatches/dataScopeOf（纯派生读）。116 写操作清单中 113 已切后端权威，其余 3 为会话/派生读，不属状态机写操作。
+
+  **批次 F 精确范围与风险评估（2026-09 评估）**：
+  - **写路径已彻底后端权威**：113/116 状态机写操作全部经 api POST + 写后重取，前端不再乐观改本地态。内存引擎的"写机制"在生产模式已不存在。
+  - **flow.js 是单体（3739 行）**：除状态机写函数（生产已绕过）外，还承载生产仍在用的纯派生读函数——report.js（outstandingOf/tripCostOf/prepaymentAvailable/dispatchRevenueOf/settleQtyOf）、message.js（toRoles）、settlement.js（buildReconciliation/calcSettlementFees，种子派生）、scheduler.js（advanceTelemetry/checkFenceEvents/recalcOverdueAll/escalatePendingExceptions/escalateContractApprovals）、store/main/login（setOperator/clearOperator）、track/index.vue（trackPointsOf/maxDeviationOf/hashOffset/visibleDispatches/dataScopeOf）。故 flow.js 不能整体删除，须拆分。
+  - **npm 556 套件（verify-flow.mjs 3149 行）直测 flow.js**：node 态 USE_API=false、无后端，依赖种子数据 + flow.js 同步执行。删除 flow.js 状态机/种子/本地 tick 前，必须先围绕 API mock 重建该套件（2000+ 行改写），属独立大工程。
+  - **前端本地调度 tick 已生产安全**：runTickLocal 仅 node 态执行；浏览器态已调真实 /api/scheduler/tick + refreshDb。
+  - **结论**：批次 F 终态（删 flow.js 状态机 + 种子 + 本地 tick + npm 套件围绕 API mock 重建 + E2E 0-19 改 waitForBackend）为大型高风险工程，须分阶段、每阶段绿门槛 + commit，不宜单次自主完成。当前写路径移除已完成，为批次 F 的前置条件（全部视图生产模式绕过 flow.js 写路径）。
