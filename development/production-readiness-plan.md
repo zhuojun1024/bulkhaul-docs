@@ -572,3 +572,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - 未读数生产模式按拉取列表 + 本地 DND（isMuted 读 db.dnd 已 hydrate）计算，与顶栏角标同口径。
     - 免打扰设置（DND）保留本地 db.dnd 对象读写（afterWrite 落库）；标已读写操作保留 flow.js。
     - **批次 4b 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（后端自批次 1 未变，mvn 33/33 沿用）
+  - **Phase 4 灰度批次 4c：safety 安全管理 + terminal/weighing 磅单 只读引用下拉切生产模式（2026-08-31 完成，done-verified）**：
+    - safety：车辆/司机登记下拉（只读引用）读后端 /api/coll/vehicles + /api/coll/drivers（useCollection + blms:refreshed 重取）；事故/培训/检查主表保留本地 db（登记写后断言依赖乐观态）。
+    - weighing：场站筛选下拉（只读引用）读后端 /api/coll/terminals；磅单主表保留本地 db（补录/复磅写后断言依赖乐观态）。
+    - **批次 4c 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（后端自批次 1 未变，mvn 33/33 沿用）
