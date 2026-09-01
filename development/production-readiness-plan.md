@@ -584,3 +584,12 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - track：fenceConfig 对象 v-model 直写（OBJ_COLL），需后端 fenceConfig GET/PUT 端点；调度器驱动只读，进度断言走后端快照。
     - driver-app：司机全链路写操作（接单→扫码装货→发车→到达→扫码卸货签收，场景 14）强耦合本地乐观态，需引擎移除阶段重写为后端状态机 + 写后重取。
     - document：派生模块 @/mock/document（无独立后端端点），需后端单证聚合端点或引擎移除阶段随快照派生。
+  - **Phase 4 灰度批次 4e：track 在途监控切生产模式（2026-08-31 完成，done-verified）**：
+    - 车次/异常读后端 /api/coll/dispatches + /exceptions（CollReadController 按装货侧区域数据权限过滤，与 visibleDispatches 同口径）+ blms:refreshed 重取。
+    - 围栏参数（fenceConfig，OBJ_COLL）经本地 fenceForm 编辑 + 防抖 PUT /api/admin/fenceConfig 落库；待确认前抑制快照回写（避免 3s 定时刷新早于后端 commit 而回退乐观态）。
+    - 后端新增 /api/admin/fenceConfig GET/PUT（AdminService.getFenceConfig/saveFenceConfig，requireAction(terminal) + 审计 + commitAll）。
+    - **批次 4e 绿门槛终验（2026-08-31，全绿）**：mvn -o test **33/0** / npm test 556/0 / test:collection 20/0 / test:contract 97/97 / build / verify-ui **95/0**（场景 13 P2 监控页在途车次 + 定时推进通过）
+  - **批次 4 收尾（2026-08-31）**：批次 4 全部 9 页中 8 页已切生产模式（report/role/message/safety/weighing/portal/track + 4a-4e）。剩余 2 页归入引擎移除阶段：
+    - driver-app：司机全链路写操作（接单→扫码装货→发车→到达→扫码卸货签收，场景 14）强耦合本地乐观态，需引擎移除阶段重写为后端状态机 + 写后重取。
+    - document：派生模块 @/mock/document（无独立后端端点），需后端单证聚合端点或引擎移除阶段随快照派生。
+  - **⚠️ 推送状态（2026-08-31）**：批次 4e 的 web（4e commit）+ server（fenceConfig 端点）commit 已落本地，GitHub 网络瞬时不可达（port 443 连接失败），待网络恢复后补推。docs 计划文档同步本地提交。
