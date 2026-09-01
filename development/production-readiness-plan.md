@@ -576,3 +576,11 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - safety：车辆/司机登记下拉（只读引用）读后端 /api/coll/vehicles + /api/coll/drivers（useCollection + blms:refreshed 重取）；事故/培训/检查主表保留本地 db（登记写后断言依赖乐观态）。
     - weighing：场站筛选下拉（只读引用）读后端 /api/coll/terminals；磅单主表保留本地 db（补录/复磅写后断言依赖乐观态）。
     - **批次 4c 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（后端自批次 1 未变，mvn 33/33 沿用）
+  - **Phase 4 灰度批次 4d：portal 客户门户 发起运输需求表单下拉切生产模式（2026-08-31 完成，done-verified）**：
+    - 发起运输需求表单的商品/装货场站/卸货场站/收货方下拉（只读引用）读后端 /api/coll/commodities + /terminals + /customers（useCollection + blms:refreshed 重取）。
+    - 本方合同/运输需求/账单/收款/发票保留本地 db（确认对账/异议/发起需求写后断言依赖乐观态）。
+    - **批次 4d 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（后端自批次 1 未变，mvn 33/33 沿用）
+  - **批次 4 收尾说明（2026-08-31）**：剩余 3 页（track 在途监控 / driver-app 司机端 / document 单证归档）需后端配套，归入"引擎移除"阶段处理：
+    - track：fenceConfig 对象 v-model 直写（OBJ_COLL），需后端 fenceConfig GET/PUT 端点；调度器驱动只读，进度断言走后端快照。
+    - driver-app：司机全链路写操作（接单→扫码装货→发车→到达→扫码卸货签收，场景 14）强耦合本地乐观态，需引擎移除阶段重写为后端状态机 + 写后重取。
+    - document：派生模块 @/mock/document（无独立后端端点），需后端单证聚合端点或引擎移除阶段随快照派生。
