@@ -552,9 +552,14 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - 写操作保留 flow.js（createContract/createPlan 后端权威）。
     - **批次 3 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0
   - **Phase 4 灰度批次 2b：driver/vehicle/plan 详情页切生产模式（2026-08-31 完成，done-verified）**：
-    - 复用既有 /api/coll/{name}/{id} 单条端点（CollReadController.one）+ useCollection 关联集合，**无需新增后端聚合端点**（比报告预估的 6 个聚合端点更省）。
-    - driver/detail：/coll/drivers/{id} + dispatches（按 driverId 过滤）。
-    - vehicle/detail：/coll/vehicles/{id} + inspections + dispatches（按 vehicleId 过滤）。
-    - plan/detail：/coll/plans/{id} + dispatches（按 planId 过滤）+ vehicles（调度对话框可用车辆，busyVehicleIds 同口径）。
+    - 详情页正确模式（与 dispatch/detail 阶段 1 基准一致）：**主记录**经 /api/coll/{name}/{id} 单条端点（CollReadController.one）读后端权威态；**关联集合保留本地 db 响应式**（flow.js 乐观变更即时可见 + refreshDb 同步），详情页**不监听 blms:refreshed 重取**（避免 200ms 防抖早于落库回写覆盖乐观态）。
+    - driver/detail：/coll/drivers/{id} 主记录 + dispatches（本地 db，按 driverId 过滤）。
+    - vehicle/detail：/coll/vehicles/{id} 主记录 + inspections + dispatches（本地 db，按 vehicleId 过滤）。
+    - plan/detail：/coll/plans/{id} 主记录 + dispatches + vehicles（本地 db；调度对话框可用车辆 busyVehicleIds 同口径）。
     - 交叉引用（commodity/contract）保留本地 hydrate；写操作保留 flow.js。
     - **批次 2b 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（后端自批次 1 未变，mvn 33/33 沿用）
+  - **Phase 4 灰度批次 2c：customer/contract/settlement 详情页切生产模式 + 批次 2b 模式修正（2026-08-31 完成，done-verified）**：
+    - 批次 2c 新增：customer/contract/settlement 详情页**主记录**切 /api/coll/{name}/{id} 后端单条端点（customer→contracts/settlements/dispatches 本地 db；contract→plans/dispatches/settlements 本地 db + canComplete；settlement→invoices/payments/dunnings 本地 db）。
+    - **批次 2b 模式修正**：初版详情页把关联集合也切 useCollection，导致 E2E 场景 17（结算详情预付款抵扣写后断言）超时——useCollection 缓存不反映 flow.js 乐观变更（写 db.payments），且 200ms 防抖 refreshDb 早于后端 commitAll 落库拉回旧态。修正为关联集合回退本地 db（与 dispatch/detail 基准一致），主记录保留后端单条端点。
+    - **关键模式沉淀**：详情页 = 主记录后端单条端点 + 关联集合本地 db（乐观变更即时可见）；列表页 = 全量 useCollection + blms:refreshed 重取（无同页写后断言）。两类页面读路径策略不同，不可混用。
+    - **批次 2c 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（含场景 17 预付款抵扣写后断言）
