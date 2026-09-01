@@ -656,7 +656,9 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - verify-api.mjs 覆盖：W 契约全端点形状 + 关键端点路径精确断言（与后端 Controller 映射一致）；api() 客户端（token 注入/无 token/401 清登录态/网络错误 code:network/非 JSON code:bad-response/body 序列化）；refreshDb()（数组 splice 保响应式身份/对象集合合并清旧键/日志时间归一/快照失败不污染 db）；afterWrite() node 态 no-op。
     - package.json 新增 test:api 脚本。门禁：npm 556/0 · test:api 35/0 · build OK · E2E 95/0。
     - **F1 后引擎移除的剩余关键路径**：flow.js 被 29 视图 + 5 个 .js 模块导入，视图同时导入写函数（仅 demo 用）与纯派生读函数（PROD 仍在用：report/track/message/settlement/scheduler/store/main/login）。故 F2/F3 须先把纯派生读函数从 flow.js 抽出到独立模块，视图改从新模块导入并删除写函数导入，flow.js 状态机方可整体删除。
-  - **F2**：移除演示模式（mode.js demo 分支 + 各视图 if(!PROD) flow 乐观分支 + login 演示切换）。门槛：build + E2E 95 绿。
+  - **F4a（npm 套件围绕 API mock 重建，完成）**：`npm test` 由 verify-flow（556，直测内存引擎）切换为薄客户端套件 = verify-api（35，W 契约 + api 客户端 + refreshDb）+ verify-collection（20，collectionStore/useCollection 数据层），全部围绕生产模式真实运行的数据层、不依赖内存引擎。verify-flow 降级为 `test:engine`（F3 删除前参照）。提交：web 3dcc327。门禁：npm test 55/0 · test:engine 556/0 · contract 97/97 · build OK。此步是 F3 删引擎的前置（`npm test` 不再依赖 flow.js 状态机/种子）。
+  - **F2（进行中）**：移除演示模式（29 视图 if(!PROD)/if(PROD) flow 乐观分支 + const PROD/isProduction 导入 + 仅 demo 用的 flow 写函数导入；保留 PROD 路径逐字节不变 + PROD 仍在用的纯派生读导入）。门槛：build + npm + test:engine + contract 绿（E2E 因本机环境问题暂不可用，见下）。
+  - **E2E 环境阻塞（2026-09，非代码回归）**：本机 Windows→WSL2 出站 TCP 连接建立固定 ~21s（3+6+12s SYN 重传，GitHub 443 与 localhost:8081 同症），后端本身快（WSL 内 3.7ms）。E2E（Windows 起 8086 代理→8081）页面水合超时 → verify-ui 在随机场景 `undefined.click()`/`querySelector` 崩溃（连跑 4 次崩于场景 10/1/5/6）。同代码上一轮 E2E 95/0，且 F4a 仅改 `npm test` 脚本、F2 移除的 demo 分支在生产恒不执行 → 判定为环境性网络故障（Tailscale 卡 starting 且无管理员权限无法停服），非代码回归。待网络恢复后补跑 E2E 95。
   - **F3**：移除种子生成（mock/*.js 种子）+ flow.js 状态机写函数 + 前端本地调度 tick（runTickLocal + 5 心跳函数）。保留 flow.js 纯派生读函数（report/track/message/settlement/scheduler 生产仍在用，非"引擎"）。门槛：build + E2E + 新 npm 绿。
   - **F4**：E2E 场景 0-19 写后断言改 waitForBackend（后端权威，替代本地乐观态断言）。门槛：E2E 绿。
   - **F5**：终态清理 + 全门禁（mvn/npm/build/E2E）+ 标记目标完成。
