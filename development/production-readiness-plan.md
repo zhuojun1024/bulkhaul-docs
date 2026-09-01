@@ -551,3 +551,10 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - plan/create：contracts（执行中合同下拉）切 useCollection；contractRemaining 剩余量读助手保留本地。
     - 写操作保留 flow.js（createContract/createPlan 后端权威）。
     - **批次 3 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0
+  - **Phase 4 灰度批次 2b：driver/vehicle/plan 详情页切生产模式（2026-08-31 完成，done-verified）**：
+    - 复用既有 /api/coll/{name}/{id} 单条端点（CollReadController.one）+ useCollection 关联集合，**无需新增后端聚合端点**（比报告预估的 6 个聚合端点更省）。
+    - driver/detail：/coll/drivers/{id} + dispatches（按 driverId 过滤）。
+    - vehicle/detail：/coll/vehicles/{id} + inspections + dispatches（按 vehicleId 过滤）。
+    - plan/detail：/coll/plans/{id} + dispatches（按 planId 过滤）+ vehicles（调度对话框可用车辆，busyVehicleIds 同口径）。
+    - 交叉引用（commodity/contract）保留本地 hydrate；写操作保留 flow.js。
+    - **批次 2b 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（后端自批次 1 未变，mvn 33/33 沿用）
