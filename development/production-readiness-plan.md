@@ -649,3 +649,11 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
   - **npm 556 套件（verify-flow.mjs 3149 行）直测 flow.js**：node 态 USE_API=false、无后端，依赖种子数据 + flow.js 同步执行。删除 flow.js 状态机/种子/本地 tick 前，必须先围绕 API mock 重建该套件（2000+ 行改写），属独立大工程。
   - **前端本地调度 tick 已生产安全**：runTickLocal 仅 node 态执行；浏览器态已调真实 /api/scheduler/tick + refreshDb。
   - **结论**：批次 F 终态（删 flow.js 状态机 + 种子 + 本地 tick + npm 套件围绕 API mock 重建 + E2E 0-19 改 waitForBackend）为大型高风险工程，须分阶段、每阶段绿门槛 + commit，不宜单次自主完成。当前写路径移除已完成，为批次 F 的前置条件（全部视图生产模式绕过 flow.js 写路径）。
+
+  **批次 F 分阶段执行计划（每阶段绿门槛 + commit，可回滚）**：
+  - **F1（关键路径，先行）**：npm test 套件围绕 API mock 重建。现状 verify-flow.mjs 3149 行/556 断言直测 flow.js 内存逻辑；该逻辑已下沉后端（mvn 33 + E2E 95 已覆盖），npm 套件与后端测试大量冗余。重建为精简 API 层/集成冒烟（api() 客户端 + 关键写流程对 mock/真后端断言），规模 ~100-300 行。门槛：新 npm 套件绿。**这是引擎可移除的前提（npm 套件是"护城河"，须先拆）。**
+  - **F2**：移除演示模式（mode.js demo 分支 + 各视图 if(!PROD) flow 乐观分支 + login 演示切换）。门槛：build + E2E 95 绿。
+  - **F3**：移除种子生成（mock/*.js 种子）+ flow.js 状态机写函数 + 前端本地调度 tick（runTickLocal + 5 心跳函数）。保留 flow.js 纯派生读函数（report/track/message/settlement/scheduler 生产仍在用，非"引擎"）。门槛：build + E2E + 新 npm 绿。
+  - **F4**：E2E 场景 0-19 写后断言改 waitForBackend（后端权威，替代本地乐观态断言）。门槛：E2E 绿。
+  - **F5**：终态清理 + 全门禁（mvn/npm/build/E2E）+ 标记目标完成。
+  - **风险**：F1 的"新 npm 套件应是什么"是核心设计决策；F3 删种子/写函数会同时影响 node 态（npm）与演示模式，须 F1/F2 先行。全程 git commit 可回滚。
