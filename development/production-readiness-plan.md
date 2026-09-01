@@ -540,3 +540,14 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - 后端：CollReadController 增加 logs 审计日志特例（GET /api/coll/logs → audit.recent(1000)，操作日志页经数据层读取，与 /api/logs 同口径）。
     - 关键事实：DEFAULT_MODE=production → E2E 场景 1-19 默认即在生产模式运行，本批次迁移的页面被现有场景真实验证（读后端 /api/coll）。
     - **批次 1 绿门槛终验（2026-08-31，全绿）**：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0
+  - **Phase 4 灰度批次 2a：settlement/list + system/user + warehouse/inventory 切生产模式（2026-08-31 完成，done-verified）**：
+    - settlement/list：settlements/bankRecords/payables 三集合切 useCollection（结算账单/银行对账/应付三页签，各自独立缓存 key）；matchCandidates 跨集合（customers.find + settlements.filter）保留本地交叉引用。
+    - system/user：users 集合切 useCollection；roles（下拉）/dataScopes（行级数据范围）保留本地交叉引用。
+    - warehouse/inventory：inventories 集合切 useCollection；warehouses/commodities（下拉）保留本地交叉引用。
+    - 过滤/统计逻辑两模式一致；写操作保留 flow.js。
+    - **批次 2a 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（DEFAULT_MODE=production，场景 1-19 生产模式验证；后端自批次 1 未变，mvn 33/33 沿用）
+  - **Phase 4 灰度批次 3：contract/create + plan/create 创建表单切生产模式（2026-08-31 完成，done-verified）**：
+    - contract/create：customers/commodities/terminals 三下拉集合切 useCollection（发货方/收货方候选、商品、装/卸场站下拉）；下拉过滤（type/status/executing）两模式一致；rateOf 运价取价读助手保留本地（rateCards 小集合）。
+    - plan/create：contracts（执行中合同下拉）切 useCollection；contractRemaining 剩余量读助手保留本地。
+    - 写操作保留 flow.js（createContract/createPlan 后端权威）。
+    - **批次 3 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0
