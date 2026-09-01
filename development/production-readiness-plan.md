@@ -533,3 +533,10 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - 验证：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0**（场景 0-22 全绿，含场景 0 reset-demo 前置恢复 + 场景 20-22 生产模式薄客户端）。
     - **内存引擎移除（终态，非本阶段范围）**：flow.js（3720 行）整体退役是 Phase 4 的**终态目标**（决策 1"最后移除引擎"），前提是**全部 33 视图迁完生产模式**（当前 4/33：contract/list、dispatch/detail、dashboard/monitor、dashboard/workbench）。剩余 29 视图仍读本地 db（快照 hydrate + 内存读），移除引擎将破坏这些视图 + npm 556 断言（node 模式本地引擎是唯一路径）+ E2E 场景 0-19（演示模式依赖本地引擎）。**内存引擎移除 = 独立后续任务**（需先迁完 29 视图 + 重建 npm 测试套件围绕 API mock），不计入 Phase 4 阶段 7。
     - **阶段 7 绿门槛终验（2026-08-31，全绿）**：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0
+  - **Phase 4 灰度批次 1：11 个列表页切生产模式（2026-08-31 完成，done-verified）**：
+    - 范围：commodity/customer/driver/vehicle/terminal/warehouse/system(log)/settlement(invoice) 8 个简单列表 + dispatch/plan/exception 3 个复杂列表（含行级数据权限）。
+    - 模式：读路径切 useCollection（PROD=isProduction() 时数据源=后端 /api/coll 权威，演示模式回退本地 db）+ blms:refreshed 监听重取；过滤/统计/交叉引用逻辑两模式一致（本地过滤口径不变）；写操作保留 flow.js（阶段 6 门控：生产模式本地 RBAC 跳过、后端权威）。
+    - 行级数据权限（dispatch/plan）：后端 /api/coll 已按当前操作人装货侧区域过滤（A1），与 visibleDispatches/visiblePlans 同口径，生产模式无需前端重复过滤。
+    - 后端：CollReadController 增加 logs 审计日志特例（GET /api/coll/logs → audit.recent(1000)，操作日志页经数据层读取，与 /api/logs 同口径）。
+    - 关键事实：DEFAULT_MODE=production → E2E 场景 1-19 默认即在生产模式运行，本批次迁移的页面被现有场景真实验证（读后端 /api/coll）。
+    - **批次 1 绿门槛终验（2026-08-31，全绿）**：mvn -o test 33/33 / npm test 556/0 / npm run test:collection 20/0 / 契约 97/97 / npm run build 通过 / verify-ui **95/0
