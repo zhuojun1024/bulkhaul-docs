@@ -567,3 +567,8 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - report：5 张报表（月度运营/客户经营/商品运量/场站吞吐/成本利润）生产模式读后端 /api/report/*（ReportController 只读聚合端点，与 @/mock/report 1:1 口径，集成测试对拍防漂移）；演示模式回退本地 report.js。报表页只读、无写后断言，直接后端聚合（不经 useCollection 集合）。
     - system/role：角色列表读后端 /api/coll/roles（useCollection + blms:refreshed 重取）；users（角色下用户数实时统计）/rolePerms（权限对象，真实读写）交叉引用保留本地。
     - **批次 4a 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（后端自批次 1 未变，mvn 33/33 沿用）
+  - **Phase 4 灰度批次 4b：message 消息中心切生产模式（2026-08-31 完成，done-verified）**：
+    - 可见消息读后端 /api/admin/messages（userAdmin.visibleMessages，角色定向过滤服务端同源）+ blms:refreshed 重取；演示模式回退本地 visibleMessages()。
+    - 未读数生产模式按拉取列表 + 本地 DND（isMuted 读 db.dnd 已 hydrate）计算，与顶栏角标同口径。
+    - 免打扰设置（DND）保留本地 db.dnd 对象读写（afterWrite 落库）；标已读写操作保留 flow.js。
+    - **批次 4b 绿门槛终验（2026-08-31，全绿）**：npm test 556/0 / npm run build 通过 / verify-ui **95/0**（后端自批次 1 未变，mvn 33/33 沿用）
