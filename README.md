@@ -26,6 +26,7 @@
 | `production-readiness-plan.md` | 生产化落地方案（安全/架构/运维/开发 16 项缺口，P0–P1 分 Phase） |
 | `api-reference.md` | API 参考（97 写端点契约 + 读端点 + 通用约定，test:contract 持续校验） |
 | `数据字典.xlsx` | 34 集合字段字典（/api/snapshot 实测：字段/类型/示例） |
+| `adr/` | 架构决策记录 ADR-001~008（薄客户端/快照水合/乐观锁/RBAC 四层/种子只读/契约表/验收栈确定性/演示取舍） |
 
 ## acceptance/ 索引
 
@@ -54,3 +55,6 @@
 | 文档 | 说明 |
 |---|---|
 | `runbook.md` | 运维手册：端口/部署/日常操作（重置/重建/锁定处理）/故障排查 10 项/验证跑法/备份最小版/变更纪律 |
+| `backup-restore.md` | 备份与恢复策略（演示定位最小版：每日 dump + RTO/RPO + 种子重建 + 转生产升级项） |
+| `security.md` | 安全说明（认证/RBAC 四层/数据安全/密钥管理/演示边界 6 项） |
+| `upgrade-migration.md` | 升级与迁移手册（Flyway 机制/滚动升级步骤/回滚/升级后检查清单） |
