@@ -596,10 +596,12 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 
 ---
 
-### 引擎移除阶段（Phase 4 终态，2026-09 启动）
+### 引擎移除阶段（Phase 4 终态，2026-09 启动，**2026-09 完成 done-verified**）
 
 > 目标：移除内存引擎（flow.js 状态机 + 种子数据 + 前端本地调度 tick），写路径纯后端权威；
 > npm 测试套件围绕 API mock 重建、E2E 场景 0-19 围绕生产模式/真服务端重建。
+>
+> **终态（F1-F5 全完成）**：内存引擎已完全移除（web 5738218），前端纯薄客户端（读 useCollection/聚合端点，写 api POST + 写后重取），后端唯一权威态；npm 55/0（verify-api 35 + verify-collection 20）围绕 API mock 重建，E2E 110/0（含 15 处后端权威断言）围绕真服务端。全门禁绿：build / npm 55 / contract 97 / E2E 110 / mvn 33。
 
 **核心架构判断（已验证）**：
 - 生产模式下本地 db 由 /api/snapshot hydrate，派生模块（document.js/dashboard.js 只 import db+utils，不依赖 flow.js）已实际读后端数据 → 引擎移除后随快照 hydrate 存活。
@@ -616,7 +618,7 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
 **全量写操作清单（116 个 flow 写函数调用点 / 27 个视图）**：
 - [x] dispatch/detail.vue（7：confirmLoad/depart/arrive/confirmUnload/reportException/resumeDispatch/supplementReceipt）— 试点 ff2c144
 - [x] dispatch/list.vue（8：+cancelDispatch/reassignDispatch）— 批次 A 55eeb0f
-- [ ] 待转换（25 视图）：contract/list(12) contract/detail(9) contract/create(1) settlement/list(9) settlement/detail(9) settlement/invoice(2) plan/list(2) plan/detail(1) plan/create(1) driver/app(9) driver/list(3) vehicle/list(3) commodity/list(3) customer/list(2) customer/detail(1) terminal/list(1) terminal/weighing(2) warehouse/list(1) warehouse/inventory(3) exception/list(4) system/user(5) system/role(3) message/index(3) safety/index(9) portal/index(3)
+- [x] 其余 25 视图（101 写操作）全部转换完成（批次 B-E，见下）：contract/list(12) contract/detail(9) contract/create(1) settlement/list(9) settlement/detail(9) settlement/invoice(2) plan/list(2) plan/detail(1) plan/create(1) driver/app(9) driver/list(3) vehicle/list(3) commodity/list(3) customer/list(2) customer/detail(1) terminal/list(1) terminal/weighing(2) warehouse/list(1) warehouse/inventory(3) exception/list(4) system/user(5) system/role(3) message/index(3) safety/index(9) portal/index(3)。**116/116 写操作全部后端权威（api POST + 写后重取），前端不再乐观改本地态。**
 
 **分步计划（每步绿门槛 mvn/npm 556/collection 20/契约 97/build/verify-ui 95 + commit）**：
 - 批次 A（dispatch 域，完成）：detail 7 + list 8 = 15 写操作后端权威。
@@ -657,12 +659,25 @@ Flyway、真 MySQL+Redis、三层测试、全局异常处理、数据权限**已
     - package.json 新增 test:api 脚本。门禁：npm 556/0 · test:api 35/0 · build OK · E2E 95/0。
     - **F1 后引擎移除的剩余关键路径**：flow.js 被 29 视图 + 5 个 .js 模块导入，视图同时导入写函数（仅 demo 用）与纯派生读函数（PROD 仍在用：report/track/message/settlement/scheduler/store/main/login）。故 F2/F3 须先把纯派生读函数从 flow.js 抽出到独立模块，视图改从新模块导入并删除写函数导入，flow.js 状态机方可整体删除。
   - **F4a（npm 套件围绕 API mock 重建，完成）**：`npm test` 由 verify-flow（556，直测内存引擎）切换为薄客户端套件 = verify-api（35，W 契约 + api 客户端 + refreshDb）+ verify-collection（20，collectionStore/useCollection 数据层），全部围绕生产模式真实运行的数据层、不依赖内存引擎。verify-flow 降级为 `test:engine`（F3 删除前参照）。提交：web 3dcc327。门禁：npm test 55/0 · test:engine 556/0 · contract 97/97 · build OK。此步是 F3 删引擎的前置（`npm test` 不再依赖 flow.js 状态机/种子）。
-  - **F2（进行中）**：移除演示模式（29 视图 if(!PROD)/if(PROD) flow 乐观分支 + const PROD/isProduction 导入 + 仅 demo 用的 flow 写函数导入；保留 PROD 路径逐字节不变 + PROD 仍在用的纯派生读导入）。门槛：build + npm + test:engine + contract + E2E 绿（E2E 已恢复，见上）。进度：6/29 完成（message/exception/vehicle/list、warehouse/list、warehouse/inventory、driver/list，提交 a07fb45 + 3751a63）。
+  - **F2（完成）**：移除演示模式（29 视图 if(!PROD)/if(PROD) flow 乐观分支 + const PROD/isProduction 导入 + 仅 demo 用的 flow 写函数导入；保留 PROD 路径逐字节不变 + PROD 仍在用的纯派生读导入）。29 视图全部完成，按页面灰度逐批提交（批次 1-4e，见上）。门槛：build + npm + test:engine + contract + E2E 绿。
   - **执行约束（2026-09 用户拍板）**：后续所有工作一律由主模型直接完成，**禁止使用子代理/工作流**——本机 DSH 接入本地 llama.cpp（-np 1，-c 262144），子代理切换会反复清空 KV cache 从头 prefill，无法取得进度。
   - **E2E 环境阻塞（2026-09，已解决）**：本机 Windows→WSL2 出站 TCP 连接建立固定 ~21s（SYN 重传），导致 Windows 侧 E2E 页面水合超时、随机场景崩溃。**解决方案：E2E 整体搬进 WSL 内运行**——浏览器（WSL chromium）+ 8086 静态/代理服务 + 8081 后端同在 WSL 网络命名空间（3.7ms），完全绕开 Windows→WSL 慢跳。verify-ui.mjs 增加两个环境变量：`E2E_DIST`（dist 指向 WSL 原生 fs 副本 /tmp/e2e-dist，因 /mnt/d drvfs 读盘慢致 page.goto 导航超时）、`E2E_TMPDIR`（导入场景临时 CSV 指向 $HOME，因 WSL snap Chromium 受 AppArmor 限制读不到 /tmp 上传文件，file.arrayBuffer() 抛 NotFoundError）。运行命令：`wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/d/.../bulkhaul-manage-web && E2E_DIST=/tmp/e2e-dist E2E_TMPDIR=$HOME/e2e_files CHROME_PATH=/usr/bin/chromium-browser node scripts/verify-ui.mjs'`（先 `cp -r dist /tmp/e2e-dist`）。**验证：WSL 内 E2E 95/0 全绿。**
   - **GitHub push 环境阻塞（2026-09，已解决）**：直连 github.com:443 固定 21s 超时。解决：git 走本地代理 `http://127.0.0.1:7897`（已对 web/docs 两仓库设 repo 级 `git config http(s).proxy`）。web 首推遇 schannel SSL 握手失败，重试即成功。push 为非必要任务，重试 3 次不成即放弃。
   - **后端容器 SCHEDULER_AUTO_ENABLED 必须为 false**：测试场景 13（P2 监控页在途进度自动推进）假设 auto-enabled=false（node 侧手动驱动 /api/scheduler/tick，发车后到页面加载之间无 tick，目标保持 intransit）。若容器 auto=true（每 3s 自动 tick），发车后 3s 内围栏检查命中（PD-00067 确定性轨迹偏离 18>阈值 15）→ 目标立即变 exception → 场景 13 两断言失败（93/2）。`start_backend.sh` 已设 `SCHEDULER_AUTO_ENABLED=false`；重启容器后 E2E 95/0。
-  - **F3**：移除种子生成（mock/*.js 种子）+ flow.js 状态机写函数 + 前端本地调度 tick（runTickLocal + 5 心跳函数）。保留 flow.js 纯派生读函数（report/track/message/settlement/scheduler 生产仍在用，非"引擎"）。门槛：build + E2E + 新 npm 绿。
-  - **F4**：E2E 场景 0-19 写后断言改 waitForBackend（后端权威，替代本地乐观态断言）。门槛：E2E 绿。
-  - **F5**：终态清理 + 全门禁（mvn/npm/build/E2E）+ 标记目标完成。
+  - **F3（完成，2026-09，提交 web 5738218）**：移除内存引擎终态——新增 src/mock/derived.js（从 flow.js 行为等价迁移纯派生读 + 会话态：setOperator/clearOperator、消息 visibleMessages/markMessageRead/getDnd/isMuted/unreadCount、数据权限 dataScopeOf/recordRegion/inDataScope、轨迹/扫码、合同信用、运价保险、安全车辆、仓储、结算费用/候选、成本侧司机收入；DATA_REGIONS 模块加载常量 → 动态 dataRegions() 函数），22 个导入方重指 @/mock/flow → @/mock/derived；重写 mock/index.js（去 18 种子 + flow 导入，仅 db + dashboard 聚合 + find）+ scheduler.js（去 runTickLocal，保留后端 /api/scheduler/tick + onSchedulerEvent）；删除 flow.js(3739 行) + 18 种子模块 + report.js + persist.js + verify-flow.mjs + test:engine 脚本。
+    - **回归修复（E2E 未暴露的真缺陷）**：db.announcements 原由已删 system.js 种子填充、未入后端快照 → 删种子后 undefined，工作台公告面板 db.announcements.length 抛 TypeError（E2E 无断言覆盖故 95/0 仍绿）。公告为静态演示数据（等价后端 FlowCtx.announcements），移入 dashboard.js 统一提供（与 weatherOf 同口径）+ mock/index.js 导出。修复后 E2E 零 page-error。
+    - 门禁（全绿）：build ✓ / npm test 55/0 ✓ / contract 97/97 ✓ / E2E 95/0（零 page-error）✓ / mvn 33/0 ✓。
+  - **F4（完成，2026-09）**：E2E 场景 1-17 写后断言补 waitForBackend 后端权威断言（15 处新增，断言总数 95→110）。每处 UI 写操作后，node 侧轮询后端快照直接断言权威态（防 UI 即时态与后端口径漂移）：
+    - 场景1 确认装货（status=loading）/ 场景4 客户确认对账（customerConfirmed 写入，按 billNo 匹配）/ 场景5 事故登记（accidents 新增）
+    - 场景6 生成合同草稿（transportRequest status=converted + contractId）/ 场景7 发起运输需求（pending 需求 +1）
+    - 场景10 全部已读（原未读消息 id 集合 read=true）/ 场景11 自动核销（unmatched 银行流水减少）/ 场景12 客户导入（customers 新增）
+    - 场景14 司机全链路（status=completed + receipt 生成）/ 场景16 补签（receipt QS-B）+ 改价提交（pendingChange）+ 改价审批（pendingChange 清空 + 单价生效）+ 客户异议（status=pending + open 异议）
+    - 场景17 预付款抵扣（收款流水 +1 + paidAmount 增加）+ 收取预付款（prepayments +1 金额 100000）
+    - **关键修复（billNo vs id）**：settlement 的 id（JS-xxxx）与 billNo（BL-xxxxxx-xxx）是两个字段，UI 行展示 billNo，初版按 x.id===billNo 匹配恒失败 → 改按 x.billNo 匹配。改价审批单价断言改读 UI 实际提交值（规避取整误差）。
+    - 门槛：E2E 110/0（含 15 处新后端权威断言，零 page-error）。
+  - **F5（完成，2026-09）**：终态清理 + 全门禁 + 标记目标完成。
+    - 删死代码 src/mode.js（双模式 feature flag，F2 后 29 视图无 isProduction 分支、全 src 零 importer；E2E 场景 20-22 的 3 处 localStorage blms_app_mode 覆盖为 no-op，一并清除）。
+    - 陈旧注释清理（~20 处）：main.js（hydrate 失败"回退种子数据"→ 空态待刷新）、api/index.js 头注释 + W 映射注释（"内存引擎同步执行/554 断言/flow.js 函数签名"→ 薄客户端/写操作名）、useCollection.js（"node/演示模式镜像，内存引擎为权威"→ node 态镜像）、base.js（引用已删 weighing.js/flow.js）、contract/list + commodity/list + dispatch/detail + track/index 视图注释（"演示模式（默认）…"→ 薄客户端）、verify-ui.mjs 头注释（"localStorage 全新种子数据"→ 后端重置回种子态）。
+    - 全门禁终验（全绿）：build ✓ / npm test 55/0 ✓ / contract 97/97 ✓ / E2E 110/0（零 page-error）✓ / mvn 33/0 ✓。
+    - **Phase 4 终态达成**：内存引擎（flow.js 状态机 + 18 种子模块 + 前端本地调度 tick）已完全移除，前端为纯薄客户端（读 useCollection/聚合端点，写 api POST + 写后重取），后端为唯一权威态。
   - **风险**：F1 的"新 npm 套件应是什么"是核心设计决策；F3 删种子/写函数会同时影响 node 态（npm）与演示模式，须 F1/F2 先行。全程 git commit 可回滚。
